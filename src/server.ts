@@ -5,6 +5,12 @@ import { readConfig } from "./config.js";
 import { OAuthTokenProvider } from "./oauth-token-provider.js";
 import { OAuthLlmClient } from "./llm-client.js";
 
+export function parsePromptText(input: unknown): string | null {
+  if (typeof input !== "string") return null;
+  const trimmed = input.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
 export function createApp() {
   const config = readConfig();
 
@@ -33,8 +39,8 @@ export function createApp() {
 
   app.post("/v1/ask", async (req, res) => {
     try {
-      const prompt = String(req.body?.text ?? "").trim();
-      if (!prompt) return res.status(400).json({ error: "text_required" });
+      const prompt = parsePromptText(req.body?.text);
+      if (!prompt) return res.status(400).json({ error: "text_must_be_non_empty_string" });
 
       const answer = await llm.generateReply([
         { role: "system", content: "You are an assistant for issue-flow-ai." },
