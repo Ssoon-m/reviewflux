@@ -1,0 +1,58 @@
+import express from "express";
+import { readConfig } from "./config.js";
+import { OAuthTokenProvider } from "./oauth-token-provider.js";
+import { OAuthLlmClient } from "./llm-client.js";
+
+export function createApp() {
+  const config = readConfig();
+
+  const tokenProvider = new OAuthTokenProvider({
+    tokenUrl: config.OAUTH_TOKEN_URL,
+    clientId: config.OAUTH_CLIENT_ID,
+    clientSecret: config.OAUTH_CLIENT_SECRET,
+    scope: config.OAUTH_SCOPE,
+    audience: config.OAUTH_AUDIENCE,
+    timeoutMs: config.LLM_TIMEOUT_MS
+  });
+
+  const llm = new OAuthLlmClient({
+    baseUrl: config.LLM_API_BASE_URL,
+    model: config.LLM_MODEL,
+    timeoutMs: config.LLM_TIMEOUT_MS,
+    tokenProvider
+  });
+
+  const app = express();
+  app.use(express.json());
+
+  app.get("/health", (_req, res) => {
+    res.json({ ok: true });
+  });
+
+  app.post("/v1/ask", async (req, res) => {
+    try {
+      const prompt = String(req.body?.text ?? "").trim();
+      if (!prompt) return res.status(400).json({ error: "text_required" });
+
+      const answer = await llm.generateReply([
+        { role: "system", content: "You are an assistant for issue-flow-ai." },
+        { role: "user", content: prompt }
+      ]);
+
+      res.json({ answer });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "unknown_error";
+      res.status(500).json({ error: message });
+    }
+  });
+
+  return { app, config };
+}
+
+if (import.meta.url === `file://${process.argv[1]}`) {
+  const { app, config } = createApp();
+  app.listen(config.PORT, () => {
+    // eslint-disable-next-line no-console
+    console.log(`issue-flow-ai server listening on :${config.PORT}`);
+  });
+}
