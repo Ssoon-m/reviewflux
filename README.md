@@ -10,7 +10,7 @@ OAuth 기반(클라이언트 크리덴셜)으로 LLM 호출하는 최소 런타�
 ## 실행
 ```bash
 cp .env.example .env
-# .env 값 채우기
+# Fill values in .env
 npm install
 npm run test
 npm run dev

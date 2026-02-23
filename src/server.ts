@@ -1,3 +1,4 @@
+import "dotenv/config";
 import express from "express";
 import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
