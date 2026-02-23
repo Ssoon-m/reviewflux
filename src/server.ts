@@ -1,4 +1,6 @@
 import express from "express";
+import { fileURLToPath } from "node:url";
+import { resolve } from "node:path";
 import { readConfig } from "./config.js";
 import { OAuthTokenProvider } from "./oauth-token-provider.js";
 import { OAuthLlmClient } from "./llm-client.js";
@@ -49,7 +51,12 @@ export function createApp() {
   return { app, config };
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+export function isDirectRun(metaUrl: string, argv1?: string): boolean {
+  if (!argv1) return false;
+  return fileURLToPath(metaUrl) === resolve(argv1);
+}
+
+if (isDirectRun(import.meta.url, process.argv[1])) {
   const { app, config } = createApp();
   app.listen(config.PORT, () => {
     // eslint-disable-next-line no-console
