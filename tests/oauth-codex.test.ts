@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  assertOAuthState,
   buildCodexAuthorizeUrl,
   createPkceChallenge,
   createPkceVerifier,
@@ -45,5 +46,21 @@ describe("oauth-codex helpers", () => {
   it("extracts raw code", () => {
     const got = extractAuthCode("abc");
     expect(got).toEqual({ code: "abc" });
+  });
+
+  it("requires state when configured", () => {
+    expect(() => assertOAuthState({ expectedState: "s", actualState: undefined, requireState: true })).toThrow(
+      "oauth_state_required"
+    );
+  });
+
+  it("rejects mismatched state", () => {
+    expect(() => assertOAuthState({ expectedState: "s", actualState: "x", requireState: true })).toThrow(
+      "oauth_state_mismatch"
+    );
+  });
+
+  it("accepts matching state", () => {
+    expect(() => assertOAuthState({ expectedState: "s", actualState: "s", requireState: true })).not.toThrow();
   });
 });

@@ -5,6 +5,7 @@ import { setTimeout as wait } from "node:timers/promises";
 import { input, password, select } from "@inquirer/prompts";
 import { ensureReviewFluxHome, loadConfig, saveConfig, type ReviewFluxConfig } from "./cli-config.js";
 import {
+  assertOAuthState,
   buildCodexAuthorizeUrl,
   CODEX_AUTHORIZE_URL,
   CODEX_CLIENT_ID,
@@ -90,11 +91,13 @@ async function waitForOAuthCode(params: {
 }): Promise<{ code: string; state?: string }> {
   const uri = new URL(params.redirectUri);
   const host = uri.hostname;
-  const schemeDefaultPort = uri.protocol === "https:" ? 443 : 80;
-  if (uri.protocol !== "http:" && uri.protocol !== "https:") {
+  if (uri.protocol === "https:") {
+    throw new Error("oauth_redirect_https_not_supported");
+  }
+  if (uri.protocol !== "http:") {
     throw new Error(`oauth_redirect_unsupported_scheme:${uri.protocol}`);
   }
-  const port = Number(uri.port || schemeDefaultPort);
+  const port = Number(uri.port || 80);
   const path = uri.pathname || "/";
 
   return await new Promise<{ code: string; state?: string }>((resolve, reject) => {
@@ -315,9 +318,7 @@ async function collectOAuthConfig(options: SetupOptions): Promise<NonNullable<Re
   } else {
     const pasted = await input({ message: "Paste redirect URL (or code / code#state)" });
     authResult = extractAuthCode(pasted);
-    if (authResult.state && authResult.state !== state) {
-      throw new Error("oauth_state_mismatch");
-    }
+    assertOAuthState({ expectedState: state, actualState: authResult.state, requireState: true });
   }
 
   console.log("[reviewflux] requesting access token...");

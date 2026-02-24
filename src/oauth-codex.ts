@@ -44,6 +44,21 @@ export function buildCodexAuthorizeUrl(params: {
   return url.toString();
 }
 
+export function assertOAuthState(params: {
+  expectedState: string;
+  actualState?: string;
+  requireState: boolean;
+}): void {
+  if (!params.actualState) {
+    if (params.requireState) throw new Error("oauth_state_required");
+    return;
+  }
+
+  if (params.actualState !== params.expectedState) {
+    throw new Error("oauth_state_mismatch");
+  }
+}
+
 export function extractAuthCode(input: string): { code: string; state?: string } {
   const trimmed = input.trim();
   if (!trimmed) throw new Error("oauth_code_required");
