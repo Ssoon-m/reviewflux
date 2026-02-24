@@ -144,6 +144,20 @@ function buildAuthorizeUrl(params: {
   return url.toString();
 }
 
+function extractAuthCode(raw: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed) throw new Error("oauth_code_required");
+
+  if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+    const url = new URL(trimmed);
+    const code = url.searchParams.get("code");
+    if (!code) throw new Error("oauth_redirect_missing_code");
+    return code;
+  }
+
+  return trimmed;
+}
+
 async function collectOAuthConfig() {
   const oauthFlow = await select<"paste-token" | "browser-flow">({
     message: "OAuth setup method",
@@ -186,16 +200,36 @@ async function collectOAuthConfig() {
     "http://127.0.0.1:8787/callback";
 
   const loginUrl = buildAuthorizeUrl({ authorizeUrl, clientId, redirectUri, scope });
-  console.log("\n[reviewflux] opening browser for OAuth login...");
-  const opened = openBrowser(loginUrl);
-  if (!opened) {
-    console.log("[reviewflux] browser auto-open failed. open this URL manually:");
-  }
+  console.log("\n[reviewflux] OAuth URL ready");
+  console.log("Open this URL in your LOCAL browser:");
   console.log(`${loginUrl}\n`);
 
-  console.log("[reviewflux] waiting for OAuth callback...");
-  const code = await waitForOAuthCode(redirectUri);
-  console.log("[reviewflux] callback received. requesting access token...");
+  const callbackMode = await select<"paste" | "local-server">({
+    message: "How do you want to complete OAuth callback?",
+    choices: [
+      { name: "Paste redirect URL (or authorization code)", value: "paste" },
+      { name: "Use local callback server", value: "local-server" }
+    ],
+    default: "paste"
+  });
+
+  let code: string;
+  if (callbackMode === "local-server") {
+    console.log("[reviewflux] opening browser for OAuth login...");
+    const opened = openBrowser(loginUrl);
+    if (!opened) {
+      console.log("[reviewflux] browser auto-open failed. open the URL above manually.");
+    }
+
+    console.log("[reviewflux] waiting for OAuth callback...");
+    code = await waitForOAuthCode(redirectUri);
+    console.log("[reviewflux] callback received.");
+  } else {
+    const pasted = await input({ message: "Paste redirect URL (or authorization code)" });
+    code = extractAuthCode(pasted);
+  }
+
+  console.log("[reviewflux] requesting access token...");
   const accessToken = await exchangeCodeForToken({ tokenUrl, clientId, clientSecret, code, redirectUri });
 
   return {
