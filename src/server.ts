@@ -1,6 +1,7 @@
 import "dotenv/config";
 import express from "express";
 import { fileURLToPath } from "node:url";
+import { realpathSync } from "node:fs";
 import { resolve } from "node:path";
 import { readConfig } from "./config.js";
 import { OAuthTokenProvider } from "./oauth-token-provider.js";
@@ -63,9 +64,17 @@ export function createApp() {
   return { app, config };
 }
 
+function canonicalPath(pathLike: string): string {
+  try {
+    return realpathSync(pathLike);
+  } catch {
+    return resolve(pathLike);
+  }
+}
+
 export function isDirectRun(metaUrl: string, argv1?: string): boolean {
   if (!argv1) return false;
-  return fileURLToPath(metaUrl) === resolve(argv1);
+  return canonicalPath(fileURLToPath(metaUrl)) === canonicalPath(argv1);
 }
 
 if (isDirectRun(import.meta.url, process.argv[1])) {
