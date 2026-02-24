@@ -12,6 +12,10 @@ export function parsePromptText(input: unknown): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
+export function getClientErrorCode(_error: unknown): string {
+  return "internal_error";
+}
+
 export function createApp() {
   const config = readConfig();
 
@@ -50,8 +54,9 @@ export function createApp() {
 
       res.json({ answer });
     } catch (error) {
-      const message = error instanceof Error ? error.message : "unknown_error";
-      res.status(500).json({ error: message });
+      // eslint-disable-next-line no-console
+      console.error("/v1/ask failed", error);
+      res.status(500).json({ error: getClientErrorCode(error) });
     }
   });
 

@@ -37,4 +37,38 @@ describe("OAuthLlmClient", () => {
     const out = await client.generateReply([{ role: "user", content: "hi" }]);
     expect(out).toBe("hello");
   });
+
+  it("accepts empty-string content as a valid response", async () => {
+    const tokenFetch = vi.fn(async () =>
+      new Response(JSON.stringify({ access_token: "token-123", expires_in: 3600 }), { status: 200 })
+    );
+
+    const llmFetch = vi.fn(async () =>
+      new Response(
+        JSON.stringify({ choices: [{ message: { content: "" } }] }),
+        { status: 200 }
+      )
+    );
+
+    const provider = new OAuthTokenProvider(
+      {
+        tokenUrl: "https://auth.example.com/token",
+        clientId: "id",
+        clientSecret: "secret"
+      },
+      tokenFetch as unknown as typeof fetch
+    );
+
+    const client = new OAuthLlmClient(
+      {
+        baseUrl: "https://llm.example.com/v1",
+        model: "demo-model",
+        tokenProvider: provider
+      },
+      llmFetch as unknown as typeof fetch
+    );
+
+    const out = await client.generateReply([{ role: "user", content: "hi" }]);
+    expect(out).toBe("");
+  });
 });

@@ -43,7 +43,7 @@ export class OAuthLlmClient {
       };
 
       const content = json.choices?.[0]?.message?.content;
-      if (!content) throw new Error("llm_response_missing_content");
+      if (content == null) throw new Error("llm_response_missing_content");
       return content;
     } finally {
       clearTimeout(timeout);
