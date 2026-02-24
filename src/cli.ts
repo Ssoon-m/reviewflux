@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+import { createServer } from "node:http";
+import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { setTimeout as wait } from "node:timers/promises";
 import { input, password, select } from "@inquirer/prompts";
 import { ensureReviewFluxHome, loadConfig, saveConfig, type ReviewFluxConfig } from "./cli-config.js";
@@ -8,6 +11,121 @@ function printHelp() {
   reviewflux setup
   reviewflux daemon start
   reviewflux daemon install`);
+}
+
+function assertNonEmpty(value: string, field: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) throw new Error(`${field}_required`);
+  return trimmed;
+}
+
+function openBrowser(url: string): void {
+  const platform = process.platform;
+  if (platform === "darwin") {
+    spawn("open", [url], { stdio: "ignore", detached: true }).unref();
+    return;
+  }
+
+  if (platform === "win32") {
+    spawn("cmd", ["/c", "start", "", url], { stdio: "ignore", detached: true }).unref();
+    return;
+  }
+
+  spawn("xdg-open", [url], { stdio: "ignore", detached: true }).unref();
+}
+
+async function waitForOAuthCode(redirectUri: string, timeoutMs = 120_000): Promise<string> {
+  const uri = new URL(redirectUri);
+  const host = uri.hostname;
+  const port = Number(uri.port || 80);
+  const path = uri.pathname || "/";
+
+  return await new Promise<string>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      server.close();
+      reject(new Error("oauth_callback_timeout"));
+    }, timeoutMs);
+
+    const server = createServer((req, res) => {
+      const reqUrl = new URL(req.url ?? "/", redirectUri);
+      if (req.method !== "GET" || reqUrl.pathname !== path) {
+        res.statusCode = 404;
+        res.end("Not found");
+        return;
+      }
+
+      const error = reqUrl.searchParams.get("error");
+      if (error) {
+        clearTimeout(timer);
+        server.close();
+        res.statusCode = 400;
+        res.end("OAuth failed. You can close this tab.");
+        reject(new Error(`oauth_error:${error}`));
+        return;
+      }
+
+      const code = reqUrl.searchParams.get("code");
+      if (!code) {
+        res.statusCode = 400;
+        res.end("Missing code. You can close this tab.");
+        return;
+      }
+
+      clearTimeout(timer);
+      server.close();
+      res.statusCode = 200;
+      res.end("ReviewFlux setup complete. You can close this tab.");
+      resolve(code);
+    });
+
+    server.listen(port, host);
+  });
+}
+
+async function exchangeCodeForToken(params: {
+  tokenUrl: string;
+  clientId: string;
+  clientSecret: string;
+  code: string;
+  redirectUri: string;
+}): Promise<string> {
+  const body = new URLSearchParams({
+    grant_type: "authorization_code",
+    code: params.code,
+    redirect_uri: params.redirectUri,
+    client_id: params.clientId,
+    client_secret: params.clientSecret
+  });
+
+  const res = await fetch(params.tokenUrl, {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body
+  });
+
+  const raw = await res.text();
+  if (!res.ok) throw new Error(`oauth_token_request_failed (${res.status}): ${raw}`);
+
+  const json = JSON.parse(raw) as { access_token?: string };
+  const accessToken = json.access_token;
+  if (!accessToken) throw new Error("oauth_token_missing_access_token");
+  return accessToken;
+}
+
+function buildAuthorizeUrl(params: {
+  authorizeUrl: string;
+  clientId: string;
+  redirectUri: string;
+  scope?: string;
+}): string {
+  const state = randomUUID();
+  const url = new URL(params.authorizeUrl);
+  url.searchParams.set("response_type", "code");
+  url.searchParams.set("client_id", params.clientId);
+  url.searchParams.set("redirect_uri", params.redirectUri);
+  url.searchParams.set("state", state);
+  if (params.scope?.trim()) url.searchParams.set("scope", params.scope.trim());
+  return url.toString();
 }
 
 async function runSetup() {
@@ -31,15 +149,17 @@ async function runSetup() {
     default: "oauth"
   });
 
-  const llmApiBaseUrl =
+  const llmApiBaseUrl = assertNonEmpty(
     (await input({ message: "LLM API base URL", default: "https://api.openai.com/v1" })) ||
-    "https://api.openai.com/v1";
-  const model = (await input({ message: "Model", default: "gpt-5-codex" })) || "gpt-5-codex";
+      "https://api.openai.com/v1",
+    "llm_api_base_url"
+  );
+  const model = assertNonEmpty((await input({ message: "Model", default: "gpt-5-codex" })) || "gpt-5-codex", "model");
 
   let config: ReviewFluxConfig;
 
   if (authMode === "apikey") {
-    const key = await password({ message: "Paste API key", mask: "*" });
+    const key = assertNonEmpty(await password({ message: "Paste API key", mask: "*" }), "api_key");
     config = {
       appName: "reviewflux",
       llm: provider,
@@ -49,23 +169,77 @@ async function runSetup() {
       apiKey: { key }
     };
   } else {
-    const authorizeUrl = await input({ message: "OAuth authorize URL (optional)", default: "" });
-    if (authorizeUrl) {
-      console.log(`Open this URL in your browser and complete auth:\n${authorizeUrl}`);
-    }
-    const accessToken = await password({ message: "Paste OAuth access token", mask: "*" });
+    const oauthFlow = await select<"paste-token" | "browser-flow">({
+      message: "OAuth setup method",
+      choices: [
+        { name: "Paste existing access token", value: "paste-token" },
+        { name: "Browser login (Auth Code flow)", value: "browser-flow" }
+      ],
+      default: "browser-flow"
+    });
 
-    config = {
-      appName: "reviewflux",
-      llm: provider,
-      authMode: "oauth",
-      llmApiBaseUrl,
-      model,
-      oauth: {
-        authorizeUrl: authorizeUrl || undefined,
-        accessToken
-      }
-    };
+    if (oauthFlow === "paste-token") {
+      const authorizeUrl = await input({ message: "OAuth authorize URL (optional)", default: "" });
+      const accessToken = assertNonEmpty(
+        await password({ message: "Paste OAuth access token", mask: "*" }),
+        "oauth_access_token"
+      );
+
+      config = {
+        appName: "reviewflux",
+        llm: provider,
+        authMode: "oauth",
+        llmApiBaseUrl,
+        model,
+        oauth: {
+          authorizeUrl: authorizeUrl || undefined,
+          accessToken
+        }
+      };
+    } else {
+      const authorizeUrl = assertNonEmpty(
+        await input({ message: "OAuth authorize URL (e.g. https://auth.example.com/authorize)" }),
+        "oauth_authorize_url"
+      );
+      const tokenUrl = assertNonEmpty(
+        await input({ message: "OAuth token URL (e.g. https://auth.example.com/oauth/token)" }),
+        "oauth_token_url"
+      );
+      const clientId = assertNonEmpty(await input({ message: "OAuth client_id" }), "oauth_client_id");
+      const clientSecret = assertNonEmpty(
+        await password({ message: "OAuth client_secret", mask: "*" }),
+        "oauth_client_secret"
+      );
+      const scope = await input({ message: "OAuth scope (optional)", default: "" });
+      const redirectUri =
+        (await input({ message: "Redirect URI", default: "http://127.0.0.1:8787/callback" })) ||
+        "http://127.0.0.1:8787/callback";
+
+      const loginUrl = buildAuthorizeUrl({ authorizeUrl, clientId, redirectUri, scope });
+      console.log("\n[reviewflux] opening browser for OAuth login...");
+      console.log(`[reviewflux] if browser does not open, visit:\n${loginUrl}\n`);
+      openBrowser(loginUrl);
+
+      console.log("[reviewflux] waiting for OAuth callback...");
+      const code = await waitForOAuthCode(redirectUri);
+      console.log("[reviewflux] callback received. requesting access token...");
+      const accessToken = await exchangeCodeForToken({ tokenUrl, clientId, clientSecret, code, redirectUri });
+
+      config = {
+        appName: "reviewflux",
+        llm: provider,
+        authMode: "oauth",
+        llmApiBaseUrl,
+        model,
+        oauth: {
+          authorizeUrl,
+          tokenUrl,
+          clientId,
+          redirectUri,
+          accessToken
+        }
+      };
+    }
   }
 
   const path = saveConfig(config);

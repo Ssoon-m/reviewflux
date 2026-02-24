@@ -12,6 +12,9 @@ export type ReviewFluxConfig = {
   model: string;
   oauth?: {
     authorizeUrl?: string;
+    tokenUrl?: string;
+    clientId?: string;
+    redirectUri?: string;
     accessToken: string;
   };
   apiKey?: {
