@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { createServer } from "node:http";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { setTimeout as wait } from "node:timers/promises";
 import { input, password, select } from "@inquirer/prompts";
@@ -29,19 +29,25 @@ function parseSetupOptions(args: string[]): SetupOptions {
   };
 }
 
-function openBrowser(url: string): void {
+function openBrowser(url: string): boolean {
   const platform = process.platform;
+
   if (platform === "darwin") {
-    spawn("open", [url], { stdio: "ignore", detached: true }).unref();
-    return;
+    const probe = spawnSync("which", ["open"], { encoding: "utf8" });
+    if (probe.status !== 0) return false;
+    const proc = spawn("open", [url], { stdio: "ignore" });
+    return proc.pid != null;
   }
 
   if (platform === "win32") {
-    spawn("cmd", ["/c", "start", "", url], { stdio: "ignore", detached: true }).unref();
-    return;
+    const proc = spawn("cmd", ["/c", "start", "", url], { stdio: "ignore" });
+    return proc.pid != null;
   }
 
-  spawn("xdg-open", [url], { stdio: "ignore", detached: true }).unref();
+  const probe = spawnSync("which", ["xdg-open"], { encoding: "utf8" });
+  if (probe.status !== 0) return false;
+  const proc = spawn("xdg-open", [url], { stdio: "ignore" });
+  return proc.pid != null;
 }
 
 async function waitForOAuthCode(redirectUri: string, timeoutMs = 120_000): Promise<string> {
@@ -181,8 +187,11 @@ async function collectOAuthConfig() {
 
   const loginUrl = buildAuthorizeUrl({ authorizeUrl, clientId, redirectUri, scope });
   console.log("\n[reviewflux] opening browser for OAuth login...");
-  console.log(`[reviewflux] if browser does not open, visit:\n${loginUrl}\n`);
-  openBrowser(loginUrl);
+  const opened = openBrowser(loginUrl);
+  if (!opened) {
+    console.log("[reviewflux] browser auto-open failed. open this URL manually:");
+  }
+  console.log(`${loginUrl}\n`);
 
   console.log("[reviewflux] waiting for OAuth callback...");
   const code = await waitForOAuthCode(redirectUri);
