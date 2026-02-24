@@ -8,10 +8,11 @@ CLI-first runtime for event-driven AI review workflows.
 - Setup asks with interactive select prompts:
   - LLM provider (currently Codex only)
   - Auth mode (OAuth or API key)
-  - Base URL + model
+  - model
   - OAuth method:
-    - paste existing token, or
-    - browser auth-code flow (opens browser, captures callback, exchanges token)
+    - browser auth-code flow (opens browser, captures callback, exchanges token), or
+    - paste existing token
+- `LLM API base URL` is hidden in default setup and only asked in `--advanced`
 - `reviewflux daemon start` (OAuth mode only for now)
   - waits 3 seconds
   - sends hardcoded message `안녕?` to `/chat/completions`
@@ -52,6 +53,7 @@ npm unlink -g reviewflux
 
 ```bash
 reviewflux setup
+reviewflux setup --advanced
 reviewflux daemon install   # placeholder for service manager wiring
 reviewflux daemon start
 ```

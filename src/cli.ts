@@ -6,9 +6,13 @@ import { setTimeout as wait } from "node:timers/promises";
 import { input, password, select } from "@inquirer/prompts";
 import { ensureReviewFluxHome, loadConfig, saveConfig, type ReviewFluxConfig } from "./cli-config.js";
 
+type SetupOptions = {
+  advanced: boolean;
+};
+
 function printHelp() {
   console.log(`reviewflux commands:
-  reviewflux setup
+  reviewflux setup [--advanced]
   reviewflux daemon start
   reviewflux daemon install`);
 }
@@ -17,6 +21,12 @@ function assertNonEmpty(value: string, field: string): string {
   const trimmed = value.trim();
   if (!trimmed) throw new Error(`${field}_required`);
   return trimmed;
+}
+
+function parseSetupOptions(args: string[]): SetupOptions {
+  return {
+    advanced: args.includes("--advanced")
+  };
 }
 
 function openBrowser(url: string): void {
@@ -128,7 +138,67 @@ function buildAuthorizeUrl(params: {
   return url.toString();
 }
 
-async function runSetup() {
+async function collectOAuthConfig() {
+  const oauthFlow = await select<"paste-token" | "browser-flow">({
+    message: "OAuth setup method",
+    choices: [
+      { name: "Browser login (Auth Code flow)", value: "browser-flow" },
+      { name: "Paste existing access token", value: "paste-token" }
+    ],
+    default: "browser-flow"
+  });
+
+  if (oauthFlow === "paste-token") {
+    const authorizeUrl = await input({ message: "OAuth authorize URL (optional)", default: "" });
+    const accessToken = assertNonEmpty(
+      await password({ message: "Paste OAuth access token", mask: "*" }),
+      "oauth_access_token"
+    );
+
+    return {
+      authorizeUrl: authorizeUrl || undefined,
+      accessToken
+    };
+  }
+
+  const authorizeUrl = assertNonEmpty(
+    await input({ message: "OAuth authorize URL (e.g. https://auth.example.com/authorize)" }),
+    "oauth_authorize_url"
+  );
+  const tokenUrl = assertNonEmpty(
+    await input({ message: "OAuth token URL (e.g. https://auth.example.com/oauth/token)" }),
+    "oauth_token_url"
+  );
+  const clientId = assertNonEmpty(await input({ message: "OAuth client_id" }), "oauth_client_id");
+  const clientSecret = assertNonEmpty(
+    await password({ message: "OAuth client_secret", mask: "*" }),
+    "oauth_client_secret"
+  );
+  const scope = await input({ message: "OAuth scope (optional)", default: "" });
+  const redirectUri =
+    (await input({ message: "Redirect URI", default: "http://127.0.0.1:8787/callback" })) ||
+    "http://127.0.0.1:8787/callback";
+
+  const loginUrl = buildAuthorizeUrl({ authorizeUrl, clientId, redirectUri, scope });
+  console.log("\n[reviewflux] opening browser for OAuth login...");
+  console.log(`[reviewflux] if browser does not open, visit:\n${loginUrl}\n`);
+  openBrowser(loginUrl);
+
+  console.log("[reviewflux] waiting for OAuth callback...");
+  const code = await waitForOAuthCode(redirectUri);
+  console.log("[reviewflux] callback received. requesting access token...");
+  const accessToken = await exchangeCodeForToken({ tokenUrl, clientId, clientSecret, code, redirectUri });
+
+  return {
+    authorizeUrl,
+    tokenUrl,
+    clientId,
+    redirectUri,
+    accessToken
+  };
+}
+
+async function runSetup(options: SetupOptions) {
   const home = ensureReviewFluxHome();
 
   console.log("[reviewflux] setup started");
@@ -149,17 +219,27 @@ async function runSetup() {
     default: "oauth"
   });
 
-  const llmApiBaseUrl = assertNonEmpty(
-    (await input({ message: "LLM API base URL", default: "https://api.openai.com/v1" })) ||
-      "https://api.openai.com/v1",
-    "llm_api_base_url"
-  );
-  const model = assertNonEmpty((await input({ message: "Model", default: "gpt-5-codex" })) || "gpt-5-codex", "model");
+  // OpenClaw-like default-first flow: hide base URL from normal setup.
+  let llmApiBaseUrl = "https://api.openai.com/v1";
+  const model =
+    (await input({
+      message: "Model",
+      default: "gpt-5-codex"
+    })) || "gpt-5-codex";
+
+  if (options.advanced) {
+    llmApiBaseUrl = assertNonEmpty(
+      (await input({ message: "LLM API base URL", default: "https://api.openai.com/v1" })) ||
+        "https://api.openai.com/v1",
+      "llm_api_base_url"
+    );
+  }
 
   let config: ReviewFluxConfig;
 
   if (authMode === "apikey") {
     const key = assertNonEmpty(await password({ message: "Paste API key", mask: "*" }), "api_key");
+
     config = {
       appName: "reviewflux",
       llm: provider,
@@ -169,77 +249,16 @@ async function runSetup() {
       apiKey: { key }
     };
   } else {
-    const oauthFlow = await select<"paste-token" | "browser-flow">({
-      message: "OAuth setup method",
-      choices: [
-        { name: "Paste existing access token", value: "paste-token" },
-        { name: "Browser login (Auth Code flow)", value: "browser-flow" }
-      ],
-      default: "browser-flow"
-    });
+    const oauth = await collectOAuthConfig();
 
-    if (oauthFlow === "paste-token") {
-      const authorizeUrl = await input({ message: "OAuth authorize URL (optional)", default: "" });
-      const accessToken = assertNonEmpty(
-        await password({ message: "Paste OAuth access token", mask: "*" }),
-        "oauth_access_token"
-      );
-
-      config = {
-        appName: "reviewflux",
-        llm: provider,
-        authMode: "oauth",
-        llmApiBaseUrl,
-        model,
-        oauth: {
-          authorizeUrl: authorizeUrl || undefined,
-          accessToken
-        }
-      };
-    } else {
-      const authorizeUrl = assertNonEmpty(
-        await input({ message: "OAuth authorize URL (e.g. https://auth.example.com/authorize)" }),
-        "oauth_authorize_url"
-      );
-      const tokenUrl = assertNonEmpty(
-        await input({ message: "OAuth token URL (e.g. https://auth.example.com/oauth/token)" }),
-        "oauth_token_url"
-      );
-      const clientId = assertNonEmpty(await input({ message: "OAuth client_id" }), "oauth_client_id");
-      const clientSecret = assertNonEmpty(
-        await password({ message: "OAuth client_secret", mask: "*" }),
-        "oauth_client_secret"
-      );
-      const scope = await input({ message: "OAuth scope (optional)", default: "" });
-      const redirectUri =
-        (await input({ message: "Redirect URI", default: "http://127.0.0.1:8787/callback" })) ||
-        "http://127.0.0.1:8787/callback";
-
-      const loginUrl = buildAuthorizeUrl({ authorizeUrl, clientId, redirectUri, scope });
-      console.log("\n[reviewflux] opening browser for OAuth login...");
-      console.log(`[reviewflux] if browser does not open, visit:\n${loginUrl}\n`);
-      openBrowser(loginUrl);
-
-      console.log("[reviewflux] waiting for OAuth callback...");
-      const code = await waitForOAuthCode(redirectUri);
-      console.log("[reviewflux] callback received. requesting access token...");
-      const accessToken = await exchangeCodeForToken({ tokenUrl, clientId, clientSecret, code, redirectUri });
-
-      config = {
-        appName: "reviewflux",
-        llm: provider,
-        authMode: "oauth",
-        llmApiBaseUrl,
-        model,
-        oauth: {
-          authorizeUrl,
-          tokenUrl,
-          clientId,
-          redirectUri,
-          accessToken
-        }
-      };
-    }
+    config = {
+      appName: "reviewflux",
+      llm: provider,
+      authMode: "oauth",
+      llmApiBaseUrl,
+      model,
+      oauth
+    };
   }
 
   const path = saveConfig(config);
@@ -287,7 +306,7 @@ async function runDaemonStart() {
 }
 
 async function main() {
-  const [cmd, subcmd] = process.argv.slice(2);
+  const [cmd, subcmd, ...rest] = process.argv.slice(2);
 
   if (!cmd || cmd === "--help" || cmd === "-h") {
     printHelp();
@@ -295,7 +314,7 @@ async function main() {
   }
 
   if (cmd === "setup") {
-    await runSetup();
+    await runSetup(parseSetupOptions(rest));
     return;
   }
 
