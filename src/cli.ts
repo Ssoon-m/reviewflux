@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 import { setTimeout as wait } from "node:timers/promises";
-import { createInterface } from "node:readline/promises";
-import { stdin as input, stdout as output } from "node:process";
+import { input, password, select } from "@inquirer/prompts";
 import { ensureReviewFluxHome, loadConfig, saveConfig, type ReviewFluxConfig } from "./cli-config.js";
 
 function printHelp() {
@@ -11,57 +10,54 @@ function printHelp() {
   reviewflux daemon install`);
 }
 
-async function ask(question: string): Promise<string> {
-  const rl = createInterface({ input, output });
-  try {
-    const answer = await rl.question(question);
-    return answer.trim();
-  } finally {
-    rl.close();
-  }
-}
-
 async function runSetup() {
   const home = ensureReviewFluxHome();
 
   console.log("[reviewflux] setup started");
   console.log(`[reviewflux] config directory: ${home}`);
 
-  console.log("\nLLM provider:");
-  console.log("  1) codex (only option for now)");
-  await ask("Select provider [1]: ");
+  const provider = await select<"codex">({
+    message: "Select LLM provider",
+    choices: [{ name: "codex (only option for now)", value: "codex" }],
+    default: "codex"
+  });
 
-  console.log("\nAuth mode:");
-  console.log("  1) OAuth (recommended)");
-  console.log("  2) API Key");
-  const authChoice = (await ask("Select auth mode [1/2]: ")) || "1";
+  const authMode = await select<"oauth" | "apikey">({
+    message: "Select auth mode",
+    choices: [
+      { name: "OAuth (recommended)", value: "oauth" },
+      { name: "API Key", value: "apikey" }
+    ],
+    default: "oauth"
+  });
 
   const llmApiBaseUrl =
-    (await ask("LLM API base URL (default: https://api.openai.com/v1): ")) || "https://api.openai.com/v1";
-  const model = (await ask("Model (default: gpt-5-codex): ")) || "gpt-5-codex";
+    (await input({ message: "LLM API base URL", default: "https://api.openai.com/v1" })) ||
+    "https://api.openai.com/v1";
+  const model = (await input({ message: "Model", default: "gpt-5-codex" })) || "gpt-5-codex";
 
   let config: ReviewFluxConfig;
 
-  if (authChoice === "2") {
-    const key = await ask("Paste API key: ");
+  if (authMode === "apikey") {
+    const key = await password({ message: "Paste API key", mask: "*" });
     config = {
       appName: "reviewflux",
-      llm: "codex",
+      llm: provider,
       authMode: "apikey",
       llmApiBaseUrl,
       model,
       apiKey: { key }
     };
   } else {
-    const authorizeUrl = await ask("OAuth authorize URL (optional, press enter to skip): ");
+    const authorizeUrl = await input({ message: "OAuth authorize URL (optional)", default: "" });
     if (authorizeUrl) {
       console.log(`Open this URL in your browser and complete auth:\n${authorizeUrl}`);
     }
-    const accessToken = await ask("Paste OAuth access token: ");
+    const accessToken = await password({ message: "Paste OAuth access token", mask: "*" });
 
     config = {
       appName: "reviewflux",
-      llm: "codex",
+      llm: provider,
       authMode: "oauth",
       llmApiBaseUrl,
       model,
