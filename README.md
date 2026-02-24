@@ -1,27 +1,51 @@
-# issue-flow-ai
+# ReviewFlux
 
-OAuth 기반(클라이언트 크리덴셜)으로 LLM 호출하는 최소 런타임.
+CLI-first runtime for event-driven AI review workflows.
 
-## 핵심
-- API Key 없이 OAuth2 토큰 발급 후 Bearer로 LLM 호출
-- `/v1/ask`로 텍스트 입력받아 LLM 응답 반환
-- OpenAI-compatible `/chat/completions` 엔드포인트 기준
+## Current Scope (MVP)
 
-## 실행
+- `reviewflux setup` creates `~/reviewflux/config.json`
+- Setup asks:
+  - LLM provider (currently Codex only)
+  - Auth mode (OAuth or API key)
+  - Base URL + model
+  - OAuth flow URL + pasted access token
+- `reviewflux daemon start` (OAuth mode only for now)
+  - waits 3 seconds
+  - sends hardcoded message `안녕?` to `/chat/completions`
+  - prints model output
+
+## Install for local CLI testing (before npm publish)
+
 ```bash
-cp .env.example .env
-# Fill values in .env
+cd /Users/openclaw/.openclaw/workspace/issue-flow-ai
 npm install
-npm run test
-npm run dev
+npm run build
+npm link
 ```
 
-## API
-- `GET /health`
-- `POST /v1/ask`
-  - body: `{ "text": "요약해줘" }`
-  - response: `{ "answer": "..." }`
+Now you can run the global-style command locally:
 
-## 주의
-- 토큰은 메모리 캐시(만료 10초 전 재발급)
-- OAuth 공급자 스펙이 다르면 `src/oauth-token-provider.ts`의 body 파라미터를 조정
+```bash
+reviewflux setup
+reviewflux daemon start
+```
+
+To remove the link later:
+
+```bash
+npm unlink -g reviewflux
+```
+
+## Command Reference
+
+```bash
+reviewflux setup
+reviewflux daemon install   # placeholder for service manager wiring
+reviewflux daemon start
+```
+
+## Notes
+
+- This project is structured to be npm-publishable (`bin` points to `dist/cli.js`).
+- OAuth token refresh/redirect callback server is not yet implemented; current setup stores a pasted access token.

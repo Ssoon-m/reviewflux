@@ -1,11 +1,14 @@
 {
-  "name": "issue-flow-ai",
+  "name": "reviewflux",
   "version": "1.0.0",
-  "description": "",
+  "description": "CLI-first event-driven review runtime",
   "main": "dist/server.js",
+  "bin": {
+    "reviewflux": "dist/cli.js"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "dev": "tsx --env-file=.env src/server.ts",
+    "dev": "tsx src/cli.ts",
     "test": "vitest run"
   },
   "repository": {
