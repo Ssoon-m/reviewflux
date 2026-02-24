@@ -221,11 +221,6 @@ async function runSetup(options: SetupOptions) {
 
   // OpenClaw-like default-first flow: hide base URL from normal setup.
   let llmApiBaseUrl = "https://api.openai.com/v1";
-  const model =
-    (await input({
-      message: "Model",
-      default: "gpt-5-codex"
-    })) || "gpt-5-codex";
 
   if (options.advanced) {
     llmApiBaseUrl = assertNonEmpty(
@@ -239,6 +234,11 @@ async function runSetup(options: SetupOptions) {
 
   if (authMode === "apikey") {
     const key = assertNonEmpty(await password({ message: "Paste API key", mask: "*" }), "api_key");
+    const model =
+      (await input({
+        message: "Model",
+        default: "gpt-5-codex"
+      })) || "gpt-5-codex";
 
     config = {
       appName: "reviewflux",
@@ -250,6 +250,11 @@ async function runSetup(options: SetupOptions) {
     };
   } else {
     const oauth = await collectOAuthConfig();
+    const model =
+      (await input({
+        message: "Model (OAuth verified)",
+        default: "gpt-5-codex"
+      })) || "gpt-5-codex";
 
     config = {
       appName: "reviewflux",
