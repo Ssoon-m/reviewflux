@@ -1,13 +1,30 @@
 #!/usr/bin/env node
 import { createServer } from "node:http";
 import { spawn, spawnSync } from "node:child_process";
-import { randomUUID } from "node:crypto";
 import { setTimeout as wait } from "node:timers/promises";
 import { input, password, select } from "@inquirer/prompts";
 import { ensureReviewFluxHome, loadConfig, saveConfig, type ReviewFluxConfig } from "./cli-config.js";
+import {
+  buildCodexAuthorizeUrl,
+  CODEX_AUTHORIZE_URL,
+  CODEX_CLIENT_ID,
+  CODEX_REDIRECT_URI,
+  CODEX_TOKEN_URL,
+  createOAuthState,
+  createPkceChallenge,
+  createPkceVerifier,
+  extractAuthCode
+} from "./oauth-codex.js";
 
 type SetupOptions = {
   advanced: boolean;
+};
+
+type OAuthTokenResponse = {
+  accessToken: string;
+  refreshToken?: string;
+  tokenType?: string;
+  expiresInSec?: number;
 };
 
 function printHelp() {
@@ -50,20 +67,24 @@ function openBrowser(url: string): boolean {
   return proc.pid != null;
 }
 
-async function waitForOAuthCode(redirectUri: string, timeoutMs = 120_000): Promise<string> {
-  const uri = new URL(redirectUri);
+async function waitForOAuthCode(params: {
+  redirectUri: string;
+  expectedState: string;
+  timeoutMs?: number;
+}): Promise<{ code: string; state?: string }> {
+  const uri = new URL(params.redirectUri);
   const host = uri.hostname;
   const port = Number(uri.port || 80);
   const path = uri.pathname || "/";
 
-  return await new Promise<string>((resolve, reject) => {
+  return await new Promise<{ code: string; state?: string }>((resolve, reject) => {
     const timer = setTimeout(() => {
       server.close();
       reject(new Error("oauth_callback_timeout"));
-    }, timeoutMs);
+    }, params.timeoutMs ?? 120_000);
 
     const server = createServer((req, res) => {
-      const reqUrl = new URL(req.url ?? "/", redirectUri);
+      const reqUrl = new URL(req.url ?? "/", params.redirectUri);
       if (req.method !== "GET" || reqUrl.pathname !== path) {
         res.statusCode = 404;
         res.end("Not found");
@@ -81,9 +102,20 @@ async function waitForOAuthCode(redirectUri: string, timeoutMs = 120_000): Promi
       }
 
       const code = reqUrl.searchParams.get("code");
+      const state = reqUrl.searchParams.get("state") ?? undefined;
+
       if (!code) {
         res.statusCode = 400;
         res.end("Missing code. You can close this tab.");
+        return;
+      }
+
+      if (state !== params.expectedState) {
+        clearTimeout(timer);
+        server.close();
+        res.statusCode = 400;
+        res.end("State mismatch. You can close this tab.");
+        reject(new Error("oauth_state_mismatch"));
         return;
       }
 
@@ -91,26 +123,26 @@ async function waitForOAuthCode(redirectUri: string, timeoutMs = 120_000): Promi
       server.close();
       res.statusCode = 200;
       res.end("ReviewFlux setup complete. You can close this tab.");
-      resolve(code);
+      resolve({ code, state });
     });
 
     server.listen(port, host);
   });
 }
 
-async function exchangeCodeForToken(params: {
+async function requestOAuthToken(params: {
   tokenUrl: string;
   clientId: string;
-  clientSecret: string;
   code: string;
   redirectUri: string;
-}): Promise<string> {
+  codeVerifier: string;
+}): Promise<OAuthTokenResponse> {
   const body = new URLSearchParams({
     grant_type: "authorization_code",
     code: params.code,
     redirect_uri: params.redirectUri,
     client_id: params.clientId,
-    client_secret: params.clientSecret
+    code_verifier: params.codeVerifier
   });
 
   const res = await fetch(params.tokenUrl, {
@@ -122,84 +154,108 @@ async function exchangeCodeForToken(params: {
   const raw = await res.text();
   if (!res.ok) throw new Error(`oauth_token_request_failed (${res.status}): ${raw}`);
 
-  const json = JSON.parse(raw) as { access_token?: string };
-  const accessToken = json.access_token;
-  if (!accessToken) throw new Error("oauth_token_missing_access_token");
-  return accessToken;
+  const json = JSON.parse(raw) as {
+    access_token?: string;
+    refresh_token?: string;
+    token_type?: string;
+    expires_in?: number;
+  };
+
+  if (!json.access_token) throw new Error("oauth_token_missing_access_token");
+
+  return {
+    accessToken: json.access_token,
+    refreshToken: json.refresh_token,
+    tokenType: json.token_type,
+    expiresInSec: json.expires_in
+  };
 }
 
-function buildAuthorizeUrl(params: {
-  authorizeUrl: string;
+async function refreshOAuthToken(params: {
+  tokenUrl: string;
   clientId: string;
-  redirectUri: string;
-  scope?: string;
-}): string {
-  const state = randomUUID();
-  const url = new URL(params.authorizeUrl);
-  url.searchParams.set("response_type", "code");
-  url.searchParams.set("client_id", params.clientId);
-  url.searchParams.set("redirect_uri", params.redirectUri);
-  url.searchParams.set("state", state);
-  if (params.scope?.trim()) url.searchParams.set("scope", params.scope.trim());
-  return url.toString();
+  refreshToken: string;
+}): Promise<OAuthTokenResponse> {
+  const body = new URLSearchParams({
+    grant_type: "refresh_token",
+    refresh_token: params.refreshToken,
+    client_id: params.clientId
+  });
+
+  const res = await fetch(params.tokenUrl, {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body
+  });
+
+  const raw = await res.text();
+  if (!res.ok) throw new Error(`oauth_refresh_failed (${res.status}): ${raw}`);
+
+  const json = JSON.parse(raw) as {
+    access_token?: string;
+    refresh_token?: string;
+    token_type?: string;
+    expires_in?: number;
+  };
+
+  if (!json.access_token) throw new Error("oauth_refresh_missing_access_token");
+
+  return {
+    accessToken: json.access_token,
+    refreshToken: json.refresh_token,
+    tokenType: json.token_type,
+    expiresInSec: json.expires_in
+  };
 }
 
-function extractAuthCode(raw: string): string {
-  const trimmed = raw.trim();
-  if (!trimmed) throw new Error("oauth_code_required");
-
-  if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
-    const url = new URL(trimmed);
-    const code = url.searchParams.get("code");
-    if (!code) throw new Error("oauth_redirect_missing_code");
-    return code;
-  }
-
-  return trimmed;
-}
-
-async function collectOAuthConfig() {
-  const oauthFlow = await select<"paste-token" | "browser-flow">({
+async function collectOAuthConfig(options: SetupOptions): Promise<NonNullable<ReviewFluxConfig["oauth"]>> {
+  const oauthFlow = await select<"browser-flow" | "paste-token">({
     message: "OAuth setup method",
     choices: [
-      { name: "Browser login (Auth Code flow)", value: "browser-flow" },
+      { name: "OpenAI Codex OAuth (browser login)", value: "browser-flow" },
       { name: "Paste existing access token", value: "paste-token" }
     ],
     default: "browser-flow"
   });
 
   if (oauthFlow === "paste-token") {
-    const authorizeUrl = await input({ message: "OAuth authorize URL (optional)", default: "" });
     const accessToken = assertNonEmpty(
       await password({ message: "Paste OAuth access token", mask: "*" }),
       "oauth_access_token"
     );
 
     return {
-      authorizeUrl: authorizeUrl || undefined,
+      authorizeUrl: CODEX_AUTHORIZE_URL,
+      tokenUrl: CODEX_TOKEN_URL,
+      clientId: CODEX_CLIENT_ID,
+      redirectUri: CODEX_REDIRECT_URI,
       accessToken
     };
   }
 
-  const authorizeUrl = assertNonEmpty(
-    await input({ message: "OAuth authorize URL (e.g. https://auth.example.com/authorize)" }),
-    "oauth_authorize_url"
-  );
-  const tokenUrl = assertNonEmpty(
-    await input({ message: "OAuth token URL (e.g. https://auth.example.com/oauth/token)" }),
-    "oauth_token_url"
-  );
-  const clientId = assertNonEmpty(await input({ message: "OAuth client_id" }), "oauth_client_id");
-  const clientSecret = assertNonEmpty(
-    await password({ message: "OAuth client_secret", mask: "*" }),
-    "oauth_client_secret"
-  );
-  const scope = await input({ message: "OAuth scope (optional)", default: "" });
-  const redirectUri =
-    (await input({ message: "Redirect URI", default: "http://127.0.0.1:8787/callback" })) ||
-    "http://127.0.0.1:8787/callback";
+  const authorizeUrl = options.advanced
+    ? assertNonEmpty(await input({ message: "OAuth authorize URL", default: CODEX_AUTHORIZE_URL }), "oauth_authorize_url")
+    : CODEX_AUTHORIZE_URL;
+  const tokenUrl = options.advanced
+    ? assertNonEmpty(await input({ message: "OAuth token URL", default: CODEX_TOKEN_URL }), "oauth_token_url")
+    : CODEX_TOKEN_URL;
+  const clientId = options.advanced
+    ? assertNonEmpty(await input({ message: "OAuth client_id", default: CODEX_CLIENT_ID }), "oauth_client_id")
+    : CODEX_CLIENT_ID;
+  const redirectUri = options.advanced
+    ? assertNonEmpty(await input({ message: "Redirect URI", default: CODEX_REDIRECT_URI }), "oauth_redirect_uri")
+    : CODEX_REDIRECT_URI;
 
-  const loginUrl = buildAuthorizeUrl({ authorizeUrl, clientId, redirectUri, scope });
+  const codeVerifier = createPkceVerifier();
+  const state = createOAuthState();
+  const loginUrl = buildCodexAuthorizeUrl({
+    authorizeUrl,
+    clientId,
+    redirectUri,
+    state,
+    codeChallenge: createPkceChallenge(codeVerifier)
+  });
+
   console.log("\n[reviewflux] OAuth URL ready");
   console.log("Open this URL in your LOCAL browser:");
   console.log(`${loginUrl}\n`);
@@ -207,13 +263,14 @@ async function collectOAuthConfig() {
   const callbackMode = await select<"paste" | "local-server">({
     message: "How do you want to complete OAuth callback?",
     choices: [
-      { name: "Paste redirect URL (or authorization code)", value: "paste" },
+      { name: "Paste redirect URL (or code / code#state)", value: "paste" },
       { name: "Use local callback server", value: "local-server" }
     ],
     default: "paste"
   });
 
-  let code: string;
+  let authResult: { code: string; state?: string };
+
   if (callbackMode === "local-server") {
     console.log("[reviewflux] opening browser for OAuth login...");
     const opened = openBrowser(loginUrl);
@@ -222,22 +279,34 @@ async function collectOAuthConfig() {
     }
 
     console.log("[reviewflux] waiting for OAuth callback...");
-    code = await waitForOAuthCode(redirectUri);
+    authResult = await waitForOAuthCode({ redirectUri, expectedState: state });
     console.log("[reviewflux] callback received.");
   } else {
-    const pasted = await input({ message: "Paste redirect URL (or authorization code)" });
-    code = extractAuthCode(pasted);
+    const pasted = await input({ message: "Paste redirect URL (or code / code#state)" });
+    authResult = extractAuthCode(pasted);
+    if (authResult.state && authResult.state !== state) {
+      throw new Error("oauth_state_mismatch");
+    }
   }
 
   console.log("[reviewflux] requesting access token...");
-  const accessToken = await exchangeCodeForToken({ tokenUrl, clientId, clientSecret, code, redirectUri });
+  const token = await requestOAuthToken({
+    tokenUrl,
+    clientId,
+    code: authResult.code,
+    redirectUri,
+    codeVerifier
+  });
 
   return {
     authorizeUrl,
     tokenUrl,
     clientId,
     redirectUri,
-    accessToken
+    accessToken: token.accessToken,
+    refreshToken: token.refreshToken,
+    tokenType: token.tokenType,
+    expiresAtEpochMs: token.expiresInSec ? Date.now() + token.expiresInSec * 1000 : undefined
   };
 }
 
@@ -262,7 +331,6 @@ async function runSetup(options: SetupOptions) {
     default: "oauth"
   });
 
-  // OpenClaw-like default-first flow: hide base URL from normal setup.
   let llmApiBaseUrl = "https://api.openai.com/v1";
 
   if (options.advanced) {
@@ -292,7 +360,7 @@ async function runSetup(options: SetupOptions) {
       apiKey: { key }
     };
   } else {
-    const oauth = await collectOAuthConfig();
+    const oauth = await collectOAuthConfig(options);
     const model =
       (await input({
         message: "Model (OAuth verified)",
@@ -322,6 +390,26 @@ async function runDaemonStart() {
     console.error("[reviewflux] currently only OAuth mode is executable in daemon start.");
     console.error("[reviewflux] run: reviewflux setup (choose OAuth)");
     process.exit(1);
+  }
+
+  if (
+    cfg.oauth.expiresAtEpochMs &&
+    cfg.oauth.refreshToken &&
+    cfg.oauth.tokenUrl &&
+    cfg.oauth.clientId &&
+    Date.now() >= cfg.oauth.expiresAtEpochMs - 10_000
+  ) {
+    console.log("[reviewflux] access token expired soon. refreshing...");
+    const token = await refreshOAuthToken({
+      tokenUrl: cfg.oauth.tokenUrl,
+      clientId: cfg.oauth.clientId,
+      refreshToken: cfg.oauth.refreshToken
+    });
+    cfg.oauth.accessToken = token.accessToken;
+    cfg.oauth.refreshToken = token.refreshToken ?? cfg.oauth.refreshToken;
+    cfg.oauth.tokenType = token.tokenType ?? cfg.oauth.tokenType;
+    cfg.oauth.expiresAtEpochMs = token.expiresInSec ? Date.now() + token.expiresInSec * 1000 : undefined;
+    saveConfig(cfg);
   }
 
   console.log("[reviewflux] waiting 3 seconds before test request...");

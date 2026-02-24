@@ -16,6 +16,9 @@ export type ReviewFluxConfig = {
     clientId?: string;
     redirectUri?: string;
     accessToken: string;
+    refreshToken?: string;
+    tokenType?: string;
+    expiresAtEpochMs?: number;
   };
   apiKey?: {
     key: string;

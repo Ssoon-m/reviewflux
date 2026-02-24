@@ -10,13 +10,15 @@ CLI-first runtime for event-driven AI review workflows.
   - Auth mode (OAuth or API key)
   - model
   - OAuth method:
-    - browser auth-code flow (opens browser, captures callback, exchanges token), or
+    - OpenAI Codex OAuth (PKCE + state verification), or
     - paste existing token
+- Default OAuth values mirror OpenClaw/pi-ai style (`auth.openai.com`, localhost callback)
 - `LLM API base URL` is hidden in default setup and only asked in `--advanced`
 - `reviewflux daemon start` (OAuth mode only for now)
   - waits 3 seconds
   - sends hardcoded message `안녕?` to `/chat/completions`
   - prints model output
+  - refreshes token when expiry metadata + refresh token are available
 
 ## Install for local CLI testing (before npm publish)
 
@@ -61,4 +63,4 @@ reviewflux daemon start
 ## Notes
 
 - This project is structured to be npm-publishable (`bin` points to `dist/cli.js`).
-- OAuth token refresh/redirect callback server is not yet implemented; current setup stores a pasted access token.
+- OAuth supports both local callback server and manual paste flow (redirect URL / code / code#state).
