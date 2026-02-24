@@ -1,4 +1,4 @@
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -20,6 +20,9 @@ describe("cli-config", () => {
 
     const path = saveConfig(config, fakeHome);
     expect(path).toBe(getConfigPath(fakeHome));
+
+    const mode = statSync(path).mode & 0o777;
+    expect(mode).toBe(0o600);
 
     const loaded = loadConfig(fakeHome);
     expect(loaded).toEqual(config);

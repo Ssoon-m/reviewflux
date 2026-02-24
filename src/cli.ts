@@ -46,6 +46,22 @@ function parseSetupOptions(args: string[]): SetupOptions {
   };
 }
 
+async function fetchTextWithTimeout(
+  url: string,
+  init: RequestInit,
+  timeoutMs = 30_000
+): Promise<{ status: number; ok: boolean; text: string }> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, { ...init, signal: ctrl.signal });
+    const text = await res.text();
+    return { status: res.status, ok: res.ok, text };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 function openBrowser(url: string): boolean {
   const platform = process.platform;
 
@@ -74,7 +90,11 @@ async function waitForOAuthCode(params: {
 }): Promise<{ code: string; state?: string }> {
   const uri = new URL(params.redirectUri);
   const host = uri.hostname;
-  const port = Number(uri.port || 80);
+  const schemeDefaultPort = uri.protocol === "https:" ? 443 : 80;
+  if (uri.protocol !== "http:" && uri.protocol !== "https:") {
+    throw new Error(`oauth_redirect_unsupported_scheme:${uri.protocol}`);
+  }
+  const port = Number(uri.port || schemeDefaultPort);
   const path = uri.pathname || "/";
 
   return await new Promise<{ code: string; state?: string }>((resolve, reject) => {
@@ -126,6 +146,11 @@ async function waitForOAuthCode(params: {
       resolve({ code, state });
     });
 
+    server.once("error", (error) => {
+      clearTimeout(timer);
+      reject(new Error(`oauth_callback_listen_failed:${error instanceof Error ? error.message : String(error)}`));
+    });
+
     server.listen(port, host);
   });
 }
@@ -145,16 +170,19 @@ async function requestOAuthToken(params: {
     code_verifier: params.codeVerifier
   });
 
-  const res = await fetch(params.tokenUrl, {
-    method: "POST",
-    headers: { "content-type": "application/x-www-form-urlencoded" },
-    body
-  });
+  const rawRes = await fetchTextWithTimeout(
+    params.tokenUrl,
+    {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body
+    },
+    30_000
+  );
 
-  const raw = await res.text();
-  if (!res.ok) throw new Error(`oauth_token_request_failed (${res.status}): ${raw}`);
+  if (!rawRes.ok) throw new Error(`oauth_token_request_failed (${rawRes.status}): ${rawRes.text}`);
 
-  const json = JSON.parse(raw) as {
+  const json = JSON.parse(rawRes.text) as {
     access_token?: string;
     refresh_token?: string;
     token_type?: string;
@@ -182,16 +210,19 @@ async function refreshOAuthToken(params: {
     client_id: params.clientId
   });
 
-  const res = await fetch(params.tokenUrl, {
-    method: "POST",
-    headers: { "content-type": "application/x-www-form-urlencoded" },
-    body
-  });
+  const rawRes = await fetchTextWithTimeout(
+    params.tokenUrl,
+    {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body
+    },
+    30_000
+  );
 
-  const raw = await res.text();
-  if (!res.ok) throw new Error(`oauth_refresh_failed (${res.status}): ${raw}`);
+  if (!rawRes.ok) throw new Error(`oauth_refresh_failed (${rawRes.status}): ${rawRes.text}`);
 
-  const json = JSON.parse(raw) as {
+  const json = JSON.parse(rawRes.text) as {
     access_token?: string;
     refresh_token?: string;
     token_type?: string;
@@ -416,26 +447,29 @@ async function runDaemonStart() {
   await wait(3000);
 
   const url = `${cfg.llmApiBaseUrl.replace(/\/$/, "")}/chat/completions`;
-  const res = await fetch(url, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      authorization: `Bearer ${cfg.oauth.accessToken}`
+  const rawRes = await fetchTextWithTimeout(
+    url,
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${cfg.oauth.accessToken}`
+      },
+      body: JSON.stringify({
+        model: cfg.model,
+        messages: [{ role: "user", content: "안녕?" }]
+      })
     },
-    body: JSON.stringify({
-      model: cfg.model,
-      messages: [{ role: "user", content: "안녕?" }]
-    })
-  });
+    30_000
+  );
 
-  if (!res.ok) {
-    const text = await res.text();
-    console.error(`[reviewflux] request failed (${res.status})`);
-    console.error(text);
+  if (!rawRes.ok) {
+    console.error(`[reviewflux] request failed (${rawRes.status})`);
+    console.error(rawRes.text);
     process.exit(1);
   }
 
-  const json = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
+  const json = JSON.parse(rawRes.text) as { choices?: Array<{ message?: { content?: string } }> };
   const content = json.choices?.[0]?.message?.content ?? "";
   console.log("[reviewflux] response:");
   console.log(content);
