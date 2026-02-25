@@ -14,11 +14,11 @@ CLI-first runtime for event-driven AI review workflows.
     - paste existing token
 - Default OAuth login uses `@mariozechner/pi-ai` (same integration approach as OpenClaw); advanced mode keeps manual endpoint overrides
 - `LLM API base URL` is hidden in default setup and only asked in `--advanced`
-- `reviewflux daemon start` (OAuth mode only for now)
+- `reviewflux daemon start`
   - waits 3 seconds
-  - sends hardcoded message `안녕?` to `/chat/completions`
+  - executes a smoke prompt via `@mariozechner/pi-ai` (`안녕?`)
   - prints model output
-  - refreshes token when expiry metadata + refresh token are available
+  - refreshes OAuth token when expiry metadata + refresh token are available
 
 ## Install for local CLI testing (before npm publish)
 

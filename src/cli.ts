@@ -3,7 +3,7 @@ import { createServer } from "node:http";
 import { spawn, spawnSync } from "node:child_process";
 import { setTimeout as wait } from "node:timers/promises";
 import { input, password, select } from "@inquirer/prompts";
-import { loginOpenAICodex, type OAuthCredentials } from "@mariozechner/pi-ai";
+import { completeSimple, getModel, loginOpenAICodex, type OAuthCredentials } from "@mariozechner/pi-ai";
 import { ensureReviewFluxHome, loadConfig, saveConfig, type ReviewFluxConfig } from "./cli-config.js";
 import {
   assertOAuthState,
@@ -466,17 +466,23 @@ async function runSetup(options: SetupOptions) {
   console.log("Next: reviewflux daemon start");
 }
 
+function resolveApiKeyForDaemon(cfg: ReviewFluxConfig): string {
+  if (cfg.authMode === "oauth" && cfg.oauth?.accessToken) {
+    return cfg.oauth.accessToken;
+  }
+  if (cfg.authMode === "apikey" && cfg.apiKey?.key?.trim()) {
+    return cfg.apiKey.key.trim();
+  }
+  throw new Error("daemon_missing_credentials");
+}
+
 async function runDaemonStart() {
   const cfg = loadConfig();
   console.log("[reviewflux] daemon start");
 
-  if (cfg.authMode !== "oauth" || !cfg.oauth?.accessToken) {
-    console.error("[reviewflux] currently only OAuth mode is executable in daemon start.");
-    console.error("[reviewflux] run: reviewflux setup (choose OAuth)");
-    process.exit(1);
-  }
-
   if (
+    cfg.authMode === "oauth" &&
+    cfg.oauth?.accessToken &&
     cfg.oauth.expiresAtEpochMs &&
     cfg.oauth.refreshToken &&
     cfg.oauth.tokenUrl &&
@@ -496,36 +502,38 @@ async function runDaemonStart() {
     saveConfig(cfg);
   }
 
+  const apiKey = resolveApiKeyForDaemon(cfg);
+
   console.log("[reviewflux] waiting 3 seconds before test request...");
   await wait(3000);
 
-  const url = `${cfg.llmApiBaseUrl.replace(/\/$/, "")}/chat/completions`;
-  const rawRes = await fetchTextWithTimeout(
-    url,
-    {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        authorization: `Bearer ${cfg.oauth.accessToken}`
-      },
-      body: JSON.stringify({
-        model: cfg.model,
-        messages: [{ role: "user", content: "안녕?" }]
-      })
-    },
-    30_000
-  );
+  const model = getModel("openai", cfg.model as never);
+  const modelWithBaseUrl = {
+    ...model,
+    baseUrl: cfg.llmApiBaseUrl.replace(/\/$/, "")
+  };
 
-  if (!rawRes.ok) {
-    console.error(`[reviewflux] request failed (${rawRes.status})`);
-    console.error(rawRes.text);
+  try {
+    const result = await completeSimple(
+      modelWithBaseUrl,
+      {
+        messages: [{ role: "user", content: "안녕?", timestamp: Date.now() }]
+      },
+      { apiKey, maxTokens: 256 }
+    );
+
+    const text = result.content
+      .filter((item): item is { type: "text"; text: string } => item.type === "text")
+      .map((item) => item.text)
+      .join("\n");
+
+    console.log("[reviewflux] response:");
+    console.log(text);
+  } catch (error) {
+    console.error("[reviewflux] request failed (pi-ai)");
+    console.error(error instanceof Error ? error.message : String(error));
     process.exit(1);
   }
-
-  const json = JSON.parse(rawRes.text) as { choices?: Array<{ message?: { content?: string } }> };
-  const content = json.choices?.[0]?.message?.content ?? "";
-  console.log("[reviewflux] response:");
-  console.log(content);
 }
 
 async function main() {
