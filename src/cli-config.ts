@@ -4,6 +4,8 @@ import { join } from "node:path";
 
 export type AuthMode = "oauth" | "apikey";
 
+export type EffortLevel = "low" | "medium" | "high" | "xhigh";
+
 export type ReviewFluxConfig = {
   appName: "reviewflux";
   llm: "codex";
@@ -11,6 +13,7 @@ export type ReviewFluxConfig = {
   llmApiBaseUrl: string;
   model: string;
   models?: string[];
+  effort?: EffortLevel;
   oauth?: {
     authorizeUrl?: string;
     tokenUrl?: string;

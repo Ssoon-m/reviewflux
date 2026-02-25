@@ -4,7 +4,14 @@ import { spawn, spawnSync } from "node:child_process";
 import { setTimeout as wait } from "node:timers/promises";
 import { checkbox, input, password, select } from "@inquirer/prompts";
 import { completeSimple, getModel, getModels, loginOpenAICodex, type OAuthCredentials } from "@mariozechner/pi-ai";
-import { ensureReviewFluxHome, loadConfig, saveConfig, type AuthMode, type ReviewFluxConfig } from "./cli-config.js";
+import {
+  ensureReviewFluxHome,
+  loadConfig,
+  saveConfig,
+  type AuthMode,
+  type EffortLevel,
+  type ReviewFluxConfig
+} from "./cli-config.js";
 import {
   assertOAuthState,
   buildCodexAuthorizeUrl,
@@ -64,6 +71,19 @@ async function pickModels(params: {
   }
 
   return [params.defaults?.[0] ?? fallback];
+}
+
+async function pickEffort(defaultEffort: EffortLevel = "medium"): Promise<EffortLevel> {
+  return select<EffortLevel>({
+    message: "Select effort",
+    choices: [
+      { name: "Low", value: "low" },
+      { name: "Medium", value: "medium" },
+      { name: "High", value: "high" },
+      { name: "Extra high", value: "xhigh" }
+    ],
+    default: defaultEffort
+  });
 }
 
 function printHelp() {
@@ -471,6 +491,7 @@ async function runSetup(options: SetupOptions) {
       authMode: "apikey",
       defaults: ["gpt-5-codex"]
     });
+    const effort = await pickEffort("medium");
 
     config = {
       appName: "reviewflux",
@@ -479,6 +500,7 @@ async function runSetup(options: SetupOptions) {
       llmApiBaseUrl,
       model: models[0],
       models,
+      effort,
       apiKey: { key }
     };
   } else {
@@ -488,6 +510,7 @@ async function runSetup(options: SetupOptions) {
       authMode: "oauth",
       defaults: ["gpt-5.3-codex"]
     });
+    const effort = await pickEffort("medium");
 
     config = {
       appName: "reviewflux",
@@ -496,6 +519,7 @@ async function runSetup(options: SetupOptions) {
       llmApiBaseUrl,
       model: models[0],
       models,
+      effort,
       oauth
     };
   }
@@ -554,7 +578,8 @@ async function runDaemonStart() {
 
   try {
     const modelProvider = cfg.authMode === "oauth" ? "openai-codex" : "openai";
-    console.log(`[reviewflux] testing model: ${selectedModel} (provider=${modelProvider})`);
+    const effort = cfg.effort ?? "medium";
+    console.log(`[reviewflux] testing model: ${selectedModel} (provider=${modelProvider}, effort=${effort})`);
     const model = getModel(modelProvider, selectedModel as never);
     if (!model) {
       throw new Error(`model_not_supported:${modelProvider}/${selectedModel}`);
@@ -569,7 +594,7 @@ async function runDaemonStart() {
       {
         messages: [{ role: "user", content: "안녕?", timestamp: Date.now() }]
       },
-      { apiKey, maxTokens: 256 }
+      { apiKey, maxTokens: 256, reasoning: effort }
     );
 
     const text = result.content

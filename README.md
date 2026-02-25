@@ -11,6 +11,7 @@ CLI-first runtime for event-driven AI review workflows.
   - model(s) via multi-select (first selected model is primary)
     - OAuth mode: OpenAI-Codex catalog (e.g., `gpt-5.3-codex`, `gpt-5.3-codex-spark`, ...)
     - API key mode: OpenAI codex-family models
+  - effort selection: low / medium / high / extra high
   - OAuth method:
     - OpenAI Codex OAuth (PKCE + state verification), or
     - paste existing token
@@ -19,6 +20,7 @@ CLI-first runtime for event-driven AI review workflows.
 - `reviewflux daemon start`
   - waits 3 seconds
   - executes a smoke prompt via `@mariozechner/pi-ai` (`안녕?`) using the currently selected model (`config.model`)
+  - applies configured effort (`config.effort`, default `medium`)
   - prints model output
   - refreshes OAuth token when expiry metadata + refresh token are available
 
