@@ -100,11 +100,13 @@ async function loginWithPiAiOpenAICodex(): Promise<OAuthCredentials> {
       }
     },
     onPrompt: async (prompt) => {
-      const value = await input({ message: prompt.message, default: prompt.placeholder ?? "" });
-      const trimmed = value.trim();
-      if (trimmed.length > 0) return trimmed;
-      if (prompt.allowEmpty) return "";
-      return "";
+      while (true) {
+        const value = await input({ message: prompt.message, default: prompt.placeholder ?? "" });
+        const trimmed = value.trim();
+        if (trimmed.length > 0) return trimmed;
+        if (prompt.allowEmpty) return "";
+        console.log("[reviewflux] OAuth input is required. Paste redirect URL/code to continue.");
+      }
     },
     onProgress: (message) => {
       if (message?.trim()) console.log(`[reviewflux] ${message}`);
