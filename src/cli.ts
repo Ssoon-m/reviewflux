@@ -2,7 +2,7 @@
 import { createServer } from "node:http";
 import { spawn, spawnSync } from "node:child_process";
 import { setTimeout as wait } from "node:timers/promises";
-import { checkbox, input, password, select } from "@inquirer/prompts";
+import { input, password, select } from "@inquirer/prompts";
 import { completeSimple, getModel, getModels, loginOpenAICodex, type OAuthCredentials } from "@mariozechner/pi-ai";
 import {
   ensureReviewFluxHome,
@@ -48,29 +48,21 @@ function getSelectableModels(authMode: AuthMode): Array<{ id: string; name: stri
     .map((model) => ({ id: model.id, name: model.name }));
 }
 
-async function pickModels(params: {
+async function pickDefaultModel(params: {
   message: string;
   authMode: AuthMode;
-  defaults?: string[];
-}): Promise<string[]> {
+  defaultModel?: string;
+}): Promise<string> {
   const available = getSelectableModels(params.authMode);
   const fallback = available.find((m) => m.id === DEFAULT_MODEL)?.id ?? available[0]?.id ?? "gpt-5-codex";
-
-  const selected = await checkbox<string>({
+  return select<string>({
     message: params.message,
     choices: available.map((model) => ({
       name: `${model.id} (${model.name})`,
-      value: model.id,
-      checked: params.defaults?.includes(model.id) ?? model.id === fallback
+      value: model.id
     })),
-    required: false
+    default: params.defaultModel ?? fallback
   });
-
-  if (selected.length > 0) {
-    return selected;
-  }
-
-  return [params.defaults?.[0] ?? fallback];
 }
 
 async function pickEffort(defaultEffort: EffortLevel = "medium"): Promise<EffortLevel> {
@@ -486,10 +478,10 @@ async function runSetup(options: SetupOptions) {
 
   if (authMode === "apikey") {
     const key = assertNonEmpty(await password({ message: "Paste API key", mask: "*" }), "api_key");
-    const models = await pickModels({
-      message: "Select model(s)",
+    const model = await pickDefaultModel({
+      message: "Select default model",
       authMode: "apikey",
-      defaults: ["gpt-5-codex"]
+      defaultModel: "gpt-5-codex"
     });
     const effort = await pickEffort("medium");
 
@@ -498,17 +490,16 @@ async function runSetup(options: SetupOptions) {
       llm: provider,
       authMode: "apikey",
       llmApiBaseUrl,
-      model: models[0],
-      models,
+      model,
       effort,
       apiKey: { key }
     };
   } else {
     const oauth = await collectOAuthConfig(options);
-    const models = await pickModels({
-      message: "Select model(s) (OAuth verified)",
+    const model = await pickDefaultModel({
+      message: "Select default model (OAuth verified)",
       authMode: "oauth",
-      defaults: ["gpt-5.3-codex"]
+      defaultModel: "gpt-5.3-codex"
     });
     const effort = await pickEffort("medium");
 
@@ -517,8 +508,7 @@ async function runSetup(options: SetupOptions) {
       llm: provider,
       authMode: "oauth",
       llmApiBaseUrl,
-      model: models[0],
-      models,
+      model,
       effort,
       oauth
     };
