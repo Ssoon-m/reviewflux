@@ -16,7 +16,7 @@ CLI-first runtime for event-driven AI review workflows.
 - `LLM API base URL` is hidden in default setup and only asked in `--advanced`
 - `reviewflux daemon start`
   - waits 3 seconds
-  - executes a smoke prompt via `@mariozechner/pi-ai` (`안녕?`)
+  - executes a smoke prompt via `@mariozechner/pi-ai` (`안녕?`) using the currently selected model (`config.model`)
   - prints model output
   - refreshes OAuth token when expiry metadata + refresh token are available
 
