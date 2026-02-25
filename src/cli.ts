@@ -86,8 +86,6 @@ function openBrowser(url: string): boolean {
 }
 
 async function loginWithPiAiOpenAICodex(): Promise<OAuthCredentials> {
-  let manualCodePromise: Promise<string> | undefined;
-
   const creds = await loginOpenAICodex({
     onAuth: async ({ url }) => {
       console.log("\n[reviewflux] OAuth URL ready");
@@ -100,18 +98,12 @@ async function loginWithPiAiOpenAICodex(): Promise<OAuthCredentials> {
       } else {
         console.log("[reviewflux] browser auto-open failed. open the URL above manually.");
       }
-
-      manualCodePromise = input({ message: "Paste redirect URL" }).then((value) =>
-        assertNonEmpty(value, "oauth_redirect_input")
-      );
     },
-    onPrompt: async (prompt) => {
-      if (manualCodePromise) return await manualCodePromise;
-      return assertNonEmpty(
+    onPrompt: async (prompt) =>
+      assertNonEmpty(
         await input({ message: prompt.message, default: prompt.placeholder ?? "" }),
         "oauth_prompt_input"
-      );
-    },
+      ),
     onProgress: (message) => {
       if (message?.trim()) console.log(`[reviewflux] ${message}`);
     }
