@@ -574,10 +574,13 @@ async function runDaemonStart() {
     if (!model) {
       throw new Error(`model_not_supported:${modelProvider}/${selectedModel}`);
     }
-    const modelWithBaseUrl = {
-      ...model,
-      baseUrl: cfg.llmApiBaseUrl.replace(/\/$/, "")
-    };
+    const modelWithBaseUrl =
+      modelProvider === "openai-codex"
+        ? model
+        : {
+            ...model,
+            baseUrl: cfg.llmApiBaseUrl.replace(/\/$/, "")
+          };
 
     const result = await completeSimple(
       modelWithBaseUrl,
