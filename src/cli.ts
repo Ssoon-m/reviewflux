@@ -86,6 +86,8 @@ function openBrowser(url: string): boolean {
 }
 
 async function loginWithPiAiOpenAICodex(): Promise<OAuthCredentials> {
+  let fallbackPromptShown = false;
+
   const creds = await loginOpenAICodex({
     onAuth: async ({ url }) => {
       console.log("\n[reviewflux] OAuth URL ready");
@@ -98,8 +100,17 @@ async function loginWithPiAiOpenAICodex(): Promise<OAuthCredentials> {
       } else {
         console.log("[reviewflux] browser auto-open failed. open the URL above manually.");
       }
+
+      console.log("[reviewflux] waiting for OAuth callback on http://127.0.0.1:1455/auth/callback ...");
     },
     onPrompt: async (prompt) => {
+      if (!fallbackPromptShown) {
+        console.log(
+          "[reviewflux] automatic callback was not completed. Switching to manual fallback (paste redirect URL/code)."
+        );
+        fallbackPromptShown = true;
+      }
+
       while (true) {
         const value = await input({ message: prompt.message, default: prompt.placeholder ?? "" });
         const trimmed = value.trim();
@@ -113,6 +124,7 @@ async function loginWithPiAiOpenAICodex(): Promise<OAuthCredentials> {
     }
   });
 
+  console.log("[reviewflux] OAuth verified.");
   return creds;
 }
 

@@ -64,3 +64,4 @@ reviewflux daemon start
 
 - This project is structured to be npm-publishable (`bin` points to `dist/cli.js`).
 - OAuth supports both local callback server and manual paste flow (redirect URL / code / code#state).
+- Setup UX follows OpenClaw-style staging: URL ready → browser open → callback wait → (fallback only if needed) paste redirect URL/code.
