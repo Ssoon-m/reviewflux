@@ -585,6 +585,7 @@ async function runDaemonStart() {
     const result = await completeSimple(
       modelWithBaseUrl,
       {
+        systemPrompt: "You are a helpful assistant.",
         messages: [{ role: "user", content: "안녕?", timestamp: Date.now() }]
       },
       { apiKey, maxTokens: 256, reasoning: effort }
