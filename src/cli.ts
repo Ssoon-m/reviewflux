@@ -525,10 +525,20 @@ async function runDaemonStart() {
     const text = result.content
       .filter((item): item is { type: "text"; text: string } => item.type === "text")
       .map((item) => item.text)
-      .join("\n");
+      .join("\n")
+      .trim();
 
     console.log("[reviewflux] response:");
-    console.log(text);
+    if (text.length > 0) {
+      console.log(text);
+    } else {
+      console.log("(no text block returned)");
+      console.log(
+        `[reviewflux] stopReason=${result.stopReason}, contentTypes=${result.content.map((item) => item.type).join(",")}`
+      );
+      console.log("[reviewflux] raw content:");
+      console.log(JSON.stringify(result.content, null, 2));
+    }
   } catch (error) {
     console.error("[reviewflux] request failed (pi-ai)");
     console.error(error instanceof Error ? error.message : String(error));
