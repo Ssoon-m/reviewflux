@@ -9,6 +9,8 @@ CLI-first runtime for event-driven AI review workflows.
   - LLM provider (currently Codex only)
   - Auth mode (OAuth or API key)
   - model(s) via multi-select (first selected model is primary)
+    - OAuth mode: OpenAI-Codex catalog (e.g., `gpt-5.3-codex`, `gpt-5.3-codex-spark`, ...)
+    - API key mode: OpenAI codex-family models
   - OAuth method:
     - OpenAI Codex OAuth (PKCE + state verification), or
     - paste existing token

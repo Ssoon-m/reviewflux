@@ -3,8 +3,8 @@ import { createServer } from "node:http";
 import { spawn, spawnSync } from "node:child_process";
 import { setTimeout as wait } from "node:timers/promises";
 import { checkbox, input, password, select } from "@inquirer/prompts";
-import { completeSimple, getModel, loginOpenAICodex, type OAuthCredentials } from "@mariozechner/pi-ai";
-import { ensureReviewFluxHome, loadConfig, saveConfig, type ReviewFluxConfig } from "./cli-config.js";
+import { completeSimple, getModel, getModels, loginOpenAICodex, type OAuthCredentials } from "@mariozechner/pi-ai";
+import { ensureReviewFluxHome, loadConfig, saveConfig, type AuthMode, type ReviewFluxConfig } from "./cli-config.js";
 import {
   assertOAuthState,
   buildCodexAuthorizeUrl,
@@ -29,23 +29,32 @@ type OAuthTokenResponse = {
   expiresInSec?: number;
 };
 
-const DEFAULT_MODEL_OPTIONS = [
-  "gpt-5-codex",
-  "codex-mini-latest",
-  "gpt-4.1",
-  "gpt-4.1-mini"
-] as const;
+const DEFAULT_MODEL = "gpt-5.3-codex";
+
+function getSelectableModels(authMode: AuthMode): Array<{ id: string; name: string }> {
+  if (authMode === "oauth") {
+    return getModels("openai-codex").map((model) => ({ id: model.id, name: model.name }));
+  }
+
+  return getModels("openai")
+    .filter((model) => model.id.includes("codex"))
+    .map((model) => ({ id: model.id, name: model.name }));
+}
 
 async function pickModels(params: {
   message: string;
+  authMode: AuthMode;
   defaults?: string[];
 }): Promise<string[]> {
+  const available = getSelectableModels(params.authMode);
+  const fallback = available.find((m) => m.id === DEFAULT_MODEL)?.id ?? available[0]?.id ?? "gpt-5-codex";
+
   const selected = await checkbox<string>({
     message: params.message,
-    choices: DEFAULT_MODEL_OPTIONS.map((model) => ({
-      name: model,
-      value: model,
-      checked: params.defaults?.includes(model) ?? model === "gpt-5-codex"
+    choices: available.map((model) => ({
+      name: `${model.id} (${model.name})`,
+      value: model.id,
+      checked: params.defaults?.includes(model.id) ?? model.id === fallback
     })),
     required: false
   });
@@ -54,7 +63,7 @@ async function pickModels(params: {
     return selected;
   }
 
-  return [params.defaults?.[0] ?? "gpt-5-codex"];
+  return [params.defaults?.[0] ?? fallback];
 }
 
 function printHelp() {
@@ -459,6 +468,7 @@ async function runSetup(options: SetupOptions) {
     const key = assertNonEmpty(await password({ message: "Paste API key", mask: "*" }), "api_key");
     const models = await pickModels({
       message: "Select model(s)",
+      authMode: "apikey",
       defaults: ["gpt-5-codex"]
     });
 
@@ -475,7 +485,8 @@ async function runSetup(options: SetupOptions) {
     const oauth = await collectOAuthConfig(options);
     const models = await pickModels({
       message: "Select model(s) (OAuth verified)",
-      defaults: ["gpt-5-codex"]
+      authMode: "oauth",
+      defaults: ["gpt-5.3-codex"]
     });
 
     config = {
@@ -542,8 +553,12 @@ async function runDaemonStart() {
   }
 
   try {
-    console.log(`[reviewflux] testing model: ${selectedModel}`);
-    const model = getModel("openai", selectedModel as never);
+    const modelProvider = cfg.authMode === "oauth" ? "openai-codex" : "openai";
+    console.log(`[reviewflux] testing model: ${selectedModel} (provider=${modelProvider})`);
+    const model = getModel(modelProvider, selectedModel as never);
+    if (!model) {
+      throw new Error(`model_not_supported:${modelProvider}/${selectedModel}`);
+    }
     const modelWithBaseUrl = {
       ...model,
       baseUrl: cfg.llmApiBaseUrl.replace(/\/$/, "")
