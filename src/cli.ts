@@ -99,11 +99,13 @@ async function loginWithPiAiOpenAICodex(): Promise<OAuthCredentials> {
         console.log("[reviewflux] browser auto-open failed. open the URL above manually.");
       }
     },
-    onPrompt: async (prompt) =>
-      assertNonEmpty(
-        await input({ message: prompt.message, default: prompt.placeholder ?? "" }),
-        "oauth_prompt_input"
-      ),
+    onPrompt: async (prompt) => {
+      const value = await input({ message: prompt.message, default: prompt.placeholder ?? "" });
+      const trimmed = value.trim();
+      if (trimmed.length > 0) return trimmed;
+      if (prompt.allowEmpty) return "";
+      return "";
+    },
     onProgress: (message) => {
       if (message?.trim()) console.log(`[reviewflux] ${message}`);
     }
