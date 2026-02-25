@@ -528,6 +528,12 @@ async function runDaemonStart() {
       .join("\n")
       .trim();
 
+    if (result.stopReason === "error") {
+      console.error("[reviewflux] model returned error response");
+      console.error(result.errorMessage ?? "unknown_model_error");
+      process.exit(1);
+    }
+
     console.log("[reviewflux] response:");
     if (text.length > 0) {
       console.log(text);
