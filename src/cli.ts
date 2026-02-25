@@ -3,6 +3,7 @@ import { createServer } from "node:http";
 import { spawn, spawnSync } from "node:child_process";
 import { setTimeout as wait } from "node:timers/promises";
 import { input, password, select } from "@inquirer/prompts";
+import { loginOpenAICodex, type OAuthCredentials } from "@mariozechner/pi-ai";
 import { ensureReviewFluxHome, loadConfig, saveConfig, type ReviewFluxConfig } from "./cli-config.js";
 import {
   assertOAuthState,
@@ -82,6 +83,41 @@ function openBrowser(url: string): boolean {
   if (probe.status !== 0) return false;
   const proc = spawn("xdg-open", [url], { stdio: "ignore" });
   return proc.pid != null;
+}
+
+async function loginWithPiAiOpenAICodex(): Promise<OAuthCredentials> {
+  let manualCodePromise: Promise<string> | undefined;
+
+  const creds = await loginOpenAICodex({
+    onAuth: async ({ url }) => {
+      console.log("\n[reviewflux] OAuth URL ready");
+      console.log("Open this URL in your LOCAL browser:");
+      console.log(`${url}\n`);
+
+      const opened = openBrowser(url);
+      if (opened) {
+        console.log("[reviewflux] opening browser for OAuth login...");
+      } else {
+        console.log("[reviewflux] browser auto-open failed. open the URL above manually.");
+      }
+
+      manualCodePromise = input({ message: "Paste redirect URL" }).then((value) =>
+        assertNonEmpty(value, "oauth_redirect_input")
+      );
+    },
+    onPrompt: async (prompt) => {
+      if (manualCodePromise) return await manualCodePromise;
+      return assertNonEmpty(
+        await input({ message: prompt.message, default: prompt.placeholder ?? "" }),
+        "oauth_prompt_input"
+      );
+    },
+    onProgress: (message) => {
+      if (message?.trim()) console.log(`[reviewflux] ${message}`);
+    }
+  });
+
+  return creds;
 }
 
 async function waitForOAuthCode(params: {
@@ -267,18 +303,26 @@ async function collectOAuthConfig(options: SetupOptions): Promise<NonNullable<Re
     };
   }
 
-  const authorizeUrl = options.advanced
-    ? assertNonEmpty(await input({ message: "OAuth authorize URL", default: CODEX_AUTHORIZE_URL }), "oauth_authorize_url")
-    : CODEX_AUTHORIZE_URL;
-  const tokenUrl = options.advanced
-    ? assertNonEmpty(await input({ message: "OAuth token URL", default: CODEX_TOKEN_URL }), "oauth_token_url")
-    : CODEX_TOKEN_URL;
-  const clientId = options.advanced
-    ? assertNonEmpty(await input({ message: "OAuth client_id", default: CODEX_CLIENT_ID }), "oauth_client_id")
-    : CODEX_CLIENT_ID;
-  const redirectUri = options.advanced
-    ? assertNonEmpty(await input({ message: "Redirect URI", default: CODEX_REDIRECT_URI }), "oauth_redirect_uri")
-    : CODEX_REDIRECT_URI;
+  if (!options.advanced) {
+    const creds = await loginWithPiAiOpenAICodex();
+    return {
+      authorizeUrl: CODEX_AUTHORIZE_URL,
+      tokenUrl: CODEX_TOKEN_URL,
+      clientId: CODEX_CLIENT_ID,
+      redirectUri: CODEX_REDIRECT_URI,
+      accessToken: creds.access,
+      refreshToken: creds.refresh,
+      expiresAtEpochMs: creds.expires,
+    };
+  }
+
+  const authorizeUrl = assertNonEmpty(
+    await input({ message: "OAuth authorize URL", default: CODEX_AUTHORIZE_URL }),
+    "oauth_authorize_url"
+  );
+  const tokenUrl = assertNonEmpty(await input({ message: "OAuth token URL", default: CODEX_TOKEN_URL }), "oauth_token_url");
+  const clientId = assertNonEmpty(await input({ message: "OAuth client_id", default: CODEX_CLIENT_ID }), "oauth_client_id");
+  const redirectUri = assertNonEmpty(await input({ message: "Redirect URI", default: CODEX_REDIRECT_URI }), "oauth_redirect_uri");
 
   const codeVerifier = createPkceVerifier();
   const state = createOAuthState();
@@ -477,7 +521,8 @@ async function runDaemonStart() {
 }
 
 async function main() {
-  const [cmd, subcmd, ...rest] = process.argv.slice(2);
+  const args = process.argv.slice(2);
+  const [cmd, subcmd, ...rest] = args;
 
   if (!cmd || cmd === "--help" || cmd === "-h") {
     printHelp();
@@ -485,7 +530,7 @@ async function main() {
   }
 
   if (cmd === "setup") {
-    await runSetup(parseSetupOptions(rest));
+    await runSetup(parseSetupOptions(args.slice(1)));
     return;
   }
 

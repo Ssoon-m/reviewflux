@@ -12,7 +12,7 @@ CLI-first runtime for event-driven AI review workflows.
   - OAuth method:
     - OpenAI Codex OAuth (PKCE + state verification), or
     - paste existing token
-- Default OAuth values mirror OpenClaw/pi-ai style (`auth.openai.com`, localhost callback)
+- Default OAuth login uses `@mariozechner/pi-ai` (same integration approach as OpenClaw); advanced mode keeps manual endpoint overrides
 - `LLM API base URL` is hidden in default setup and only asked in `--advanced`
 - `reviewflux daemon start` (OAuth mode only for now)
   - waits 3 seconds
