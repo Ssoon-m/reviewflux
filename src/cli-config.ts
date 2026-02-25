@@ -26,7 +26,7 @@ export type ReviewFluxConfig = {
 };
 
 export function getReviewFluxHome(home: string = homedir()): string {
-  return join(home, "reviewflux");
+  return join(home, ".reviewflux");
 }
 
 export function getConfigPath(home: string = homedir()): string {

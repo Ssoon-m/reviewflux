@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { getConfigPath, saveConfig, loadConfig, type ReviewFluxConfig } from "../src/cli-config.js";
 
 describe("cli-config", () => {
-  it("saves and loads config under ~/reviewflux", () => {
+  it("saves and loads config under ~/.reviewflux", () => {
     const fakeHome = mkdtempSync(join(tmpdir(), "reviewflux-home-"));
     const config: ReviewFluxConfig = {
       appName: "reviewflux",
