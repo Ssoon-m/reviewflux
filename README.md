@@ -5,10 +5,10 @@ CLI-first runtime for event-driven AI review workflows.
 ## Current Scope (MVP)
 
 - `reviewflux setup` creates `~/.reviewflux/config.json`
-- Setup asks with interactive select prompts:
+- Setup asks with interactive prompts:
   - LLM provider (currently Codex only)
   - Auth mode (OAuth or API key)
-  - model
+  - model(s) via multi-select (first selected model is primary)
   - OAuth method:
     - OpenAI Codex OAuth (PKCE + state verification), or
     - paste existing token

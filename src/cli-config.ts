@@ -10,6 +10,7 @@ export type ReviewFluxConfig = {
   authMode: AuthMode;
   llmApiBaseUrl: string;
   model: string;
+  models?: string[];
   oauth?: {
     authorizeUrl?: string;
     tokenUrl?: string;

@@ -2,7 +2,7 @@
 import { createServer } from "node:http";
 import { spawn, spawnSync } from "node:child_process";
 import { setTimeout as wait } from "node:timers/promises";
-import { input, password, select } from "@inquirer/prompts";
+import { checkbox, input, password, select } from "@inquirer/prompts";
 import { completeSimple, getModel, loginOpenAICodex, type OAuthCredentials } from "@mariozechner/pi-ai";
 import { ensureReviewFluxHome, loadConfig, saveConfig, type ReviewFluxConfig } from "./cli-config.js";
 import {
@@ -28,6 +28,34 @@ type OAuthTokenResponse = {
   tokenType?: string;
   expiresInSec?: number;
 };
+
+const DEFAULT_MODEL_OPTIONS = [
+  "gpt-5-codex",
+  "codex-mini-latest",
+  "gpt-4.1",
+  "gpt-4.1-mini"
+] as const;
+
+async function pickModels(params: {
+  message: string;
+  defaults?: string[];
+}): Promise<string[]> {
+  const selected = await checkbox<string>({
+    message: params.message,
+    choices: DEFAULT_MODEL_OPTIONS.map((model) => ({
+      name: model,
+      value: model,
+      checked: params.defaults?.includes(model) ?? model === "gpt-5-codex"
+    })),
+    required: false
+  });
+
+  if (selected.length > 0) {
+    return selected;
+  }
+
+  return [params.defaults?.[0] ?? "gpt-5-codex"];
+}
 
 function printHelp() {
   console.log(`reviewflux commands:
@@ -429,34 +457,34 @@ async function runSetup(options: SetupOptions) {
 
   if (authMode === "apikey") {
     const key = assertNonEmpty(await password({ message: "Paste API key", mask: "*" }), "api_key");
-    const model =
-      (await input({
-        message: "Model",
-        default: "gpt-5-codex"
-      })) || "gpt-5-codex";
+    const models = await pickModels({
+      message: "Select model(s)",
+      defaults: ["gpt-5-codex"]
+    });
 
     config = {
       appName: "reviewflux",
       llm: provider,
       authMode: "apikey",
       llmApiBaseUrl,
-      model,
+      model: models[0],
+      models,
       apiKey: { key }
     };
   } else {
     const oauth = await collectOAuthConfig(options);
-    const model =
-      (await input({
-        message: "Model (OAuth verified)",
-        default: "gpt-5-codex"
-      })) || "gpt-5-codex";
+    const models = await pickModels({
+      message: "Select model(s) (OAuth verified)",
+      defaults: ["gpt-5-codex"]
+    });
 
     config = {
       appName: "reviewflux",
       llm: provider,
       authMode: "oauth",
       llmApiBaseUrl,
-      model,
+      model: models[0],
+      models,
       oauth
     };
   }
@@ -507,49 +535,59 @@ async function runDaemonStart() {
   console.log("[reviewflux] waiting 3 seconds before test request...");
   await wait(3000);
 
-  const model = getModel("openai", cfg.model as never);
-  const modelWithBaseUrl = {
-    ...model,
-    baseUrl: cfg.llmApiBaseUrl.replace(/\/$/, "")
-  };
+  const candidates = cfg.models && cfg.models.length > 0 ? cfg.models : [cfg.model];
+  const errors: string[] = [];
 
-  try {
-    const result = await completeSimple(
-      modelWithBaseUrl,
-      {
-        messages: [{ role: "user", content: "안녕?", timestamp: Date.now() }]
-      },
-      { apiKey, maxTokens: 256 }
-    );
+  for (const candidate of candidates) {
+    try {
+      console.log(`[reviewflux] testing model: ${candidate}`);
+      const model = getModel("openai", candidate as never);
+      const modelWithBaseUrl = {
+        ...model,
+        baseUrl: cfg.llmApiBaseUrl.replace(/\/$/, "")
+      };
 
-    const text = result.content
-      .filter((item): item is { type: "text"; text: string } => item.type === "text")
-      .map((item) => item.text)
-      .join("\n")
-      .trim();
-
-    if (result.stopReason === "error") {
-      console.error("[reviewflux] model returned error response");
-      console.error(result.errorMessage ?? "unknown_model_error");
-      process.exit(1);
-    }
-
-    console.log("[reviewflux] response:");
-    if (text.length > 0) {
-      console.log(text);
-    } else {
-      console.log("(no text block returned)");
-      console.log(
-        `[reviewflux] stopReason=${result.stopReason}, contentTypes=${result.content.map((item) => item.type).join(",")}`
+      const result = await completeSimple(
+        modelWithBaseUrl,
+        {
+          messages: [{ role: "user", content: "안녕?", timestamp: Date.now() }]
+        },
+        { apiKey, maxTokens: 256 }
       );
-      console.log("[reviewflux] raw content:");
-      console.log(JSON.stringify(result.content, null, 2));
+
+      const text = result.content
+        .filter((item): item is { type: "text"; text: string } => item.type === "text")
+        .map((item) => item.text)
+        .join("\n")
+        .trim();
+
+      if (result.stopReason === "error") {
+        errors.push(`${candidate}: ${result.errorMessage ?? "unknown_model_error"}`);
+        continue;
+      }
+
+      console.log("[reviewflux] response:");
+      if (text.length > 0) {
+        console.log(text);
+      } else {
+        console.log("(no text block returned)");
+        console.log(
+          `[reviewflux] stopReason=${result.stopReason}, contentTypes=${result.content.map((item) => item.type).join(",")}`
+        );
+        console.log("[reviewflux] raw content:");
+        console.log(JSON.stringify(result.content, null, 2));
+      }
+      return;
+    } catch (error) {
+      errors.push(`${candidate}: ${error instanceof Error ? error.message : String(error)}`);
     }
-  } catch (error) {
-    console.error("[reviewflux] request failed (pi-ai)");
-    console.error(error instanceof Error ? error.message : String(error));
-    process.exit(1);
   }
+
+  console.error("[reviewflux] request failed for all configured models");
+  for (const err of errors) {
+    console.error(`- ${err}`);
+  }
+  process.exit(1);
 }
 
 async function main() {
