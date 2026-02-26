@@ -1,4 +1,4 @@
-# ReviewFlux
+# reviewflux
 
 CLI-first runtime for event-driven AI review workflows.
 
