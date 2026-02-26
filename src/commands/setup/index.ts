@@ -8,6 +8,7 @@ import {
   type AuthMode,
   type EffortLevel,
   type ReviewFluxConfig,
+  type LlmProvider,
 } from "../../cli/config.js";
 import {
   assertOAuthState,
@@ -47,8 +48,15 @@ function assertNonEmpty(value: string, field: string): string {
   return trimmed;
 }
 
-function getSelectableModels(authMode: AuthMode): Array<{ id: string; name: string }> {
-  if (authMode === "oauth") {
+function getSelectableModels(params: { authMode: AuthMode; provider: LlmProvider }): Array<{ id: string; name: string }> {
+  if (params.provider === "gemini") {
+    return [
+      { id: "gemini-2.5-pro", name: "Gemini 2.5 Pro" },
+      { id: "gemini-2.5-flash", name: "Gemini 2.5 Flash" },
+    ];
+  }
+
+  if (params.authMode === "oauth") {
     return getModels("openai-codex").map((model) => ({ id: model.id, name: model.name }));
   }
 
@@ -60,9 +68,10 @@ function getSelectableModels(authMode: AuthMode): Array<{ id: string; name: stri
 async function pickDefaultModel(params: {
   message: string;
   authMode: AuthMode;
+  provider: LlmProvider;
   defaultModel?: string;
 }): Promise<string> {
-  const available = getSelectableModels(params.authMode);
+  const available = getSelectableModels({ authMode: params.authMode, provider: params.provider });
   const fallback = available.find((m) => m.id === DEFAULT_MODEL)?.id ?? available[0]?.id ?? "gpt-5-codex";
   return select<string>({
     message: params.message,
@@ -399,27 +408,35 @@ async function runSetup(options: SetupOptions): Promise<void> {
   console.log("[reviewflux] setup started");
   console.log(`[reviewflux] config directory: ${home}`);
 
-  const provider = await select<"codex">({
+  const provider = await select<LlmProvider>({
     message: "Select LLM provider",
-    choices: [{ name: "codex (only option for now)", value: "codex" }],
+    choices: [
+      { name: "codex (OpenAI)", value: "codex" },
+      { name: "gemini (Google)", value: "gemini" },
+    ],
     default: "codex",
   });
 
+  const authChoices =
+    provider === "gemini"
+      ? [{ name: "API Key", value: "apikey" as const }]
+      : [
+          { name: "OAuth (recommended)", value: "oauth" as const },
+          { name: "API Key", value: "apikey" as const },
+        ];
+
   const authMode = await select<"oauth" | "apikey">({
     message: "Select auth mode",
-    choices: [
-      { name: "OAuth (recommended)", value: "oauth" },
-      { name: "API Key", value: "apikey" },
-    ],
-    default: "oauth",
+    choices: authChoices,
+    default: provider === "gemini" ? "apikey" : "oauth",
   });
 
-  let llmApiBaseUrl = "https://api.openai.com/v1";
+  const defaultBaseUrl = provider === "gemini" ? "https://generativelanguage.googleapis.com/v1beta/openai" : "https://api.openai.com/v1";
+  let llmApiBaseUrl = defaultBaseUrl;
 
   if (options.advanced) {
     llmApiBaseUrl = assertNonEmpty(
-      (await input({ message: "LLM API base URL", default: "https://api.openai.com/v1" })) ||
-        "https://api.openai.com/v1",
+      (await input({ message: "LLM API base URL", default: defaultBaseUrl })) || defaultBaseUrl,
       "llm_api_base_url",
     );
   }
@@ -431,7 +448,8 @@ async function runSetup(options: SetupOptions): Promise<void> {
     const model = await pickDefaultModel({
       message: "Select default model",
       authMode: "apikey",
-      defaultModel: "gpt-5-codex",
+      provider,
+      defaultModel: provider === "gemini" ? "gemini-2.5-flash" : "gpt-5-codex",
     });
     const effort = await pickEffort("medium");
 
@@ -449,6 +467,7 @@ async function runSetup(options: SetupOptions): Promise<void> {
     const model = await pickDefaultModel({
       message: "Select default model (OAuth verified)",
       authMode: "oauth",
+      provider,
       defaultModel: "gpt-5.3-codex",
     });
     const effort = await pickEffort("medium");

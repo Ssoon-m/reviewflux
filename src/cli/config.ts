@@ -6,13 +6,17 @@ export type AuthMode = "oauth" | "apikey";
 
 export type EffortLevel = "low" | "medium" | "high" | "xhigh";
 
+export type LlmProvider = "codex" | "gemini" | "openai" | "anthropic";
+
 export type ReviewFluxConfig = {
   appName: "reviewflux";
-  llm: "codex";
+  llm: LlmProvider;
   authMode: AuthMode;
   llmApiBaseUrl: string;
   model: string;
   models?: string[];
+  modelAliases?: Record<string, { provider: LlmProvider; model: string }>;
+  repoModelPolicies?: Record<string, { defaultAlias?: string; taskAliases?: Record<string, string> }>;
   effort?: EffortLevel;
   oauth?: {
     authorizeUrl?: string;
