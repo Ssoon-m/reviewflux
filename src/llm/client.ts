@@ -2,35 +2,42 @@ import { OAuthTokenProvider } from "../auth/oauth-token-provider.js";
 
 export type ChatInput = { role: "system" | "user" | "assistant"; content: string };
 
-export class OAuthLlmClient {
+export interface LlmProvider {
+  generateReply(messages: ChatInput[]): Promise<string>;
+}
+
+type HttpClientOptions = {
+  baseUrl: string;
+  model: string;
+  timeoutMs?: number;
+};
+
+class OpenAICompatibleClient {
   constructor(
-    private readonly options: {
-      baseUrl: string;
-      model: string;
-      timeoutMs?: number;
-      tokenProvider: OAuthTokenProvider;
-    },
-    private readonly fetchImpl: typeof fetch = fetch
+    private readonly options: HttpClientOptions,
+    private readonly authHeaderProvider: () => Promise<Record<string, string>>,
+    private readonly fetchImpl: typeof fetch = fetch,
   ) {}
 
   async generateReply(messages: ChatInput[]): Promise<string> {
-    const token = await this.options.tokenProvider.getAccessToken();
     const ctrl = new AbortController();
     const timeout = setTimeout(() => ctrl.abort(), this.options.timeoutMs ?? 30_000);
 
     try {
+      const authHeaders = await this.authHeaderProvider();
+
       const res = await this.fetchImpl(`${this.options.baseUrl.replace(/\/$/, "")}/chat/completions`, {
         method: "POST",
         headers: {
           "content-type": "application/json",
-          authorization: `Bearer ${token}`
+          ...authHeaders,
         },
         body: JSON.stringify({
           model: this.options.model,
           messages,
-          temperature: 0.2
+          temperature: 0.2,
         }),
-        signal: ctrl.signal
+        signal: ctrl.signal,
       });
 
       if (!res.ok) {
@@ -49,4 +56,54 @@ export class OAuthLlmClient {
       clearTimeout(timeout);
     }
   }
+}
+
+export class OAuthLlmClient implements LlmProvider {
+  private readonly inner: OpenAICompatibleClient;
+
+  constructor(
+    private readonly options: HttpClientOptions & {
+      tokenProvider: OAuthTokenProvider;
+    },
+    fetchImpl: typeof fetch = fetch,
+  ) {
+    this.inner = new OpenAICompatibleClient(
+      options,
+      async () => ({ authorization: `Bearer ${await options.tokenProvider.getAccessToken()}` }),
+      fetchImpl,
+    );
+  }
+
+  generateReply(messages: ChatInput[]): Promise<string> {
+    return this.inner.generateReply(messages);
+  }
+}
+
+export class ApiKeyLlmClient implements LlmProvider {
+  private readonly inner: OpenAICompatibleClient;
+
+  constructor(
+    private readonly options: HttpClientOptions & {
+      apiKey: string;
+    },
+    fetchImpl: typeof fetch = fetch,
+  ) {
+    this.inner = new OpenAICompatibleClient(options, async () => ({ authorization: `Bearer ${options.apiKey}` }), fetchImpl);
+  }
+
+  generateReply(messages: ChatInput[]): Promise<string> {
+    return this.inner.generateReply(messages);
+  }
+}
+
+export type LlmProviderFactoryInput =
+  | ({ mode: "oauth"; tokenProvider: OAuthTokenProvider } & HttpClientOptions)
+  | ({ mode: "apikey"; apiKey: string } & HttpClientOptions);
+
+export function createLlmProvider(input: LlmProviderFactoryInput, fetchImpl: typeof fetch = fetch): LlmProvider {
+  if (input.mode === "oauth") {
+    return new OAuthLlmClient(input, fetchImpl);
+  }
+
+  return new ApiKeyLlmClient(input, fetchImpl);
 }

@@ -5,7 +5,7 @@ import { realpathSync } from "node:fs";
 import { resolve } from "node:path";
 import { readConfig } from "../config/env.js";
 import { OAuthTokenProvider } from "../auth/oauth-token-provider.js";
-import { OAuthLlmClient } from "../llm/client.js";
+import { createLlmProvider } from "../llm/client.js";
 
 export function parsePromptText(input: unknown): string | null {
   if (typeof input !== "string") return null;
@@ -29,11 +29,12 @@ export function createApp() {
     timeoutMs: config.LLM_TIMEOUT_MS
   });
 
-  const llm = new OAuthLlmClient({
+  const llm = createLlmProvider({
+    mode: "oauth",
     baseUrl: config.LLM_API_BASE_URL,
     model: config.LLM_MODEL,
     timeoutMs: config.LLM_TIMEOUT_MS,
-    tokenProvider
+    tokenProvider,
   });
 
   const app = express();
