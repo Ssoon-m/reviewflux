@@ -11,7 +11,7 @@ import {
   type AuthMode,
   type EffortLevel,
   type ReviewFluxConfig
-} from "./cli-config.js";
+} from "./config.js";
 import {
   assertOAuthState,
   buildCodexAuthorizeUrl,
@@ -23,7 +23,7 @@ import {
   createPkceChallenge,
   createPkceVerifier,
   extractAuthCode
-} from "./oauth-codex.js";
+} from "../auth/oauth-codex.js";
 
 type SetupOptions = {
   advanced: boolean;

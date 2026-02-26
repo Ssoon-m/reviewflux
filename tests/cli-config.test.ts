@@ -2,7 +2,7 @@ import { mkdtempSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { getConfigPath, saveConfig, loadConfig, type ReviewFluxConfig } from "../src/cli-config.js";
+import { getConfigPath, saveConfig, loadConfig, type ReviewFluxConfig } from "../src/cli/config.js";
 
 describe("cli-config", () => {
   it("saves and loads config under ~/.reviewflux", () => {

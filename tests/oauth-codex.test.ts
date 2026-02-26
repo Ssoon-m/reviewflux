@@ -5,7 +5,7 @@ import {
   createPkceChallenge,
   createPkceVerifier,
   extractAuthCode
-} from "../src/oauth-codex.js";
+} from "../src/auth/oauth-codex.js";
 
 describe("oauth-codex helpers", () => {
   it("creates PKCE verifier/challenge pair", () => {
