@@ -2,13 +2,13 @@
   "name": "reviewflux",
   "version": "1.0.0",
   "description": "CLI-first event-driven review runtime",
-  "main": "dist/server.js",
+  "main": "dist/gateway/http-server.js",
   "bin": {
-    "reviewflux": "dist/cli.js"
+    "reviewflux": "dist/cli/index.js"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "dev": "tsx src/cli.ts",
+    "dev": "tsx src/cli/index.ts",
     "test": "vitest run"
   },
   "repository": {

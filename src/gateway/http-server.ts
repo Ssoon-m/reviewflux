@@ -3,9 +3,9 @@ import express from "express";
 import { fileURLToPath } from "node:url";
 import { realpathSync } from "node:fs";
 import { resolve } from "node:path";
-import { readConfig } from "./config.js";
-import { OAuthTokenProvider } from "./oauth-token-provider.js";
-import { OAuthLlmClient } from "./llm-client.js";
+import { readConfig } from "../config/env.js";
+import { OAuthTokenProvider } from "../auth/oauth-token-provider.js";
+import { OAuthLlmClient } from "../llm/client.js";
 
 export function parsePromptText(input: unknown): string | null {
   if (typeof input !== "string") return null;

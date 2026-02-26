@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { OAuthTokenProvider } from "../src/oauth-token-provider.js";
-import { OAuthLlmClient } from "../src/llm-client.js";
+import { OAuthTokenProvider } from "../src/auth/oauth-token-provider.js";
+import { OAuthLlmClient } from "../src/llm/client.js";
 
 describe("OAuthLlmClient", () => {
   it("uses bearer token and returns content", async () => {

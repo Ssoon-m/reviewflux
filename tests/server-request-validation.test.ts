@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getClientErrorCode, parsePromptText } from "../src/server.js";
+import { getClientErrorCode, parsePromptText } from "../src/gateway/http-server.js";
 
 describe("parsePromptText", () => {
   it("accepts non-empty strings", () => {

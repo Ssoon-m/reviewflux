@@ -1,17 +1,14 @@
-#!/usr/bin/env node
 import { createServer } from "node:http";
 import { spawn, spawnSync } from "node:child_process";
-import { setTimeout as wait } from "node:timers/promises";
 import { input, password, select } from "@inquirer/prompts";
-import { completeSimple, getModel, getModels, loginOpenAICodex, type OAuthCredentials } from "@mariozechner/pi-ai";
+import { getModels, loginOpenAICodex, type OAuthCredentials } from "@mariozechner/pi-ai";
 import {
   ensureReviewFluxHome,
-  loadConfig,
   saveConfig,
   type AuthMode,
   type EffortLevel,
-  type ReviewFluxConfig
-} from "./cli-config.js";
+  type ReviewFluxConfig,
+} from "../../cli/config.js";
 import {
   assertOAuthState,
   buildCodexAuthorizeUrl,
@@ -22,8 +19,8 @@ import {
   createOAuthState,
   createPkceChallenge,
   createPkceVerifier,
-  extractAuthCode
-} from "./oauth-codex.js";
+  extractAuthCode,
+} from "../../auth/oauth-codex.js";
 
 type SetupOptions = {
   advanced: boolean;
@@ -37,6 +34,18 @@ type OAuthTokenResponse = {
 };
 
 const DEFAULT_MODEL = "gpt-5.3-codex";
+
+function parseSetupOptions(args: string[]): SetupOptions {
+  return {
+    advanced: args.includes("--advanced"),
+  };
+}
+
+function assertNonEmpty(value: string, field: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) throw new Error(`${field}_required`);
+  return trimmed;
+}
 
 function getSelectableModels(authMode: AuthMode): Array<{ id: string; name: string }> {
   if (authMode === "oauth") {
@@ -59,9 +68,9 @@ async function pickDefaultModel(params: {
     message: params.message,
     choices: available.map((model) => ({
       name: `${model.id} (${model.name})`,
-      value: model.id
+      value: model.id,
     })),
-    default: params.defaultModel ?? fallback
+    default: params.defaultModel ?? fallback,
   });
 }
 
@@ -72,35 +81,16 @@ async function pickEffort(defaultEffort: EffortLevel = "medium"): Promise<Effort
       { name: "Low", value: "low" },
       { name: "Medium", value: "medium" },
       { name: "High", value: "high" },
-      { name: "Extra high", value: "xhigh" }
+      { name: "Extra high", value: "xhigh" },
     ],
-    default: defaultEffort
+    default: defaultEffort,
   });
-}
-
-function printHelp() {
-  console.log(`reviewflux commands:
-  reviewflux setup [--advanced]
-  reviewflux daemon start
-  reviewflux daemon install`);
-}
-
-function assertNonEmpty(value: string, field: string): string {
-  const trimmed = value.trim();
-  if (!trimmed) throw new Error(`${field}_required`);
-  return trimmed;
-}
-
-function parseSetupOptions(args: string[]): SetupOptions {
-  return {
-    advanced: args.includes("--advanced")
-  };
 }
 
 async function fetchTextWithTimeout(
   url: string,
   init: RequestInit,
-  timeoutMs = 30_000
+  timeoutMs = 30_000,
 ): Promise<{ status: number; ok: boolean; text: string }> {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
@@ -155,7 +145,7 @@ async function loginWithPiAiOpenAICodex(): Promise<OAuthCredentials> {
     onPrompt: async (prompt) => {
       if (!fallbackPromptShown) {
         console.log(
-          "[reviewflux] automatic callback was not completed. Switching to manual fallback (paste redirect URL/code)."
+          "[reviewflux] automatic callback was not completed. Switching to manual fallback (paste redirect URL/code).",
         );
         fallbackPromptShown = true;
       }
@@ -170,7 +160,7 @@ async function loginWithPiAiOpenAICodex(): Promise<OAuthCredentials> {
     },
     onProgress: (message) => {
       if (message?.trim()) console.log(`[reviewflux] ${message}`);
-    }
+    },
   });
 
   console.log("[reviewflux] OAuth verified.");
@@ -263,7 +253,7 @@ async function requestOAuthToken(params: {
     code: params.code,
     redirect_uri: params.redirectUri,
     client_id: params.clientId,
-    code_verifier: params.codeVerifier
+    code_verifier: params.codeVerifier,
   });
 
   const rawRes = await fetchTextWithTimeout(
@@ -271,9 +261,9 @@ async function requestOAuthToken(params: {
     {
       method: "POST",
       headers: { "content-type": "application/x-www-form-urlencoded" },
-      body
+      body,
     },
-    30_000
+    30_000,
   );
 
   if (!rawRes.ok) throw new Error(`oauth_token_request_failed (${rawRes.status}): ${rawRes.text}`);
@@ -291,47 +281,7 @@ async function requestOAuthToken(params: {
     accessToken: json.access_token,
     refreshToken: json.refresh_token,
     tokenType: json.token_type,
-    expiresInSec: json.expires_in
-  };
-}
-
-async function refreshOAuthToken(params: {
-  tokenUrl: string;
-  clientId: string;
-  refreshToken: string;
-}): Promise<OAuthTokenResponse> {
-  const body = new URLSearchParams({
-    grant_type: "refresh_token",
-    refresh_token: params.refreshToken,
-    client_id: params.clientId
-  });
-
-  const rawRes = await fetchTextWithTimeout(
-    params.tokenUrl,
-    {
-      method: "POST",
-      headers: { "content-type": "application/x-www-form-urlencoded" },
-      body
-    },
-    30_000
-  );
-
-  if (!rawRes.ok) throw new Error(`oauth_refresh_failed (${rawRes.status}): ${rawRes.text}`);
-
-  const json = JSON.parse(rawRes.text) as {
-    access_token?: string;
-    refresh_token?: string;
-    token_type?: string;
-    expires_in?: number;
-  };
-
-  if (!json.access_token) throw new Error("oauth_refresh_missing_access_token");
-
-  return {
-    accessToken: json.access_token,
-    refreshToken: json.refresh_token,
-    tokenType: json.token_type,
-    expiresInSec: json.expires_in
+    expiresInSec: json.expires_in,
   };
 }
 
@@ -340,15 +290,15 @@ async function collectOAuthConfig(options: SetupOptions): Promise<NonNullable<Re
     message: "OAuth setup method",
     choices: [
       { name: "OpenAI Codex OAuth (browser login)", value: "browser-flow" },
-      { name: "Paste existing access token", value: "paste-token" }
+      { name: "Paste existing access token", value: "paste-token" },
     ],
-    default: "browser-flow"
+    default: "browser-flow",
   });
 
   if (oauthFlow === "paste-token") {
     const accessToken = assertNonEmpty(
       await password({ message: "Paste OAuth access token", mask: "*" }),
-      "oauth_access_token"
+      "oauth_access_token",
     );
 
     return {
@@ -356,7 +306,7 @@ async function collectOAuthConfig(options: SetupOptions): Promise<NonNullable<Re
       tokenUrl: CODEX_TOKEN_URL,
       clientId: CODEX_CLIENT_ID,
       redirectUri: CODEX_REDIRECT_URI,
-      accessToken
+      accessToken,
     };
   }
 
@@ -375,7 +325,7 @@ async function collectOAuthConfig(options: SetupOptions): Promise<NonNullable<Re
 
   const authorizeUrl = assertNonEmpty(
     await input({ message: "OAuth authorize URL", default: CODEX_AUTHORIZE_URL }),
-    "oauth_authorize_url"
+    "oauth_authorize_url",
   );
   const tokenUrl = assertNonEmpty(await input({ message: "OAuth token URL", default: CODEX_TOKEN_URL }), "oauth_token_url");
   const clientId = assertNonEmpty(await input({ message: "OAuth client_id", default: CODEX_CLIENT_ID }), "oauth_client_id");
@@ -388,7 +338,7 @@ async function collectOAuthConfig(options: SetupOptions): Promise<NonNullable<Re
     clientId,
     redirectUri,
     state,
-    codeChallenge: createPkceChallenge(codeVerifier)
+    codeChallenge: createPkceChallenge(codeVerifier),
   });
 
   console.log("\n[reviewflux] OAuth URL ready");
@@ -399,9 +349,9 @@ async function collectOAuthConfig(options: SetupOptions): Promise<NonNullable<Re
     message: "How do you want to complete OAuth callback?",
     choices: [
       { name: "Paste redirect URL (or code / code#state)", value: "paste" },
-      { name: "Use local callback server", value: "local-server" }
+      { name: "Use local callback server", value: "local-server" },
     ],
-    default: "paste"
+    default: "paste",
   });
 
   let authResult: { code: string; state?: string };
@@ -428,7 +378,7 @@ async function collectOAuthConfig(options: SetupOptions): Promise<NonNullable<Re
     clientId,
     code: authResult.code,
     redirectUri,
-    codeVerifier
+    codeVerifier,
   });
 
   return {
@@ -439,11 +389,11 @@ async function collectOAuthConfig(options: SetupOptions): Promise<NonNullable<Re
     accessToken: token.accessToken,
     refreshToken: token.refreshToken,
     tokenType: token.tokenType,
-    expiresAtEpochMs: token.expiresInSec ? Date.now() + token.expiresInSec * 1000 : undefined
+    expiresAtEpochMs: token.expiresInSec ? Date.now() + token.expiresInSec * 1000 : undefined,
   };
 }
 
-async function runSetup(options: SetupOptions) {
+async function runSetup(options: SetupOptions): Promise<void> {
   const home = ensureReviewFluxHome();
 
   console.log("[reviewflux] setup started");
@@ -452,16 +402,16 @@ async function runSetup(options: SetupOptions) {
   const provider = await select<"codex">({
     message: "Select LLM provider",
     choices: [{ name: "codex (only option for now)", value: "codex" }],
-    default: "codex"
+    default: "codex",
   });
 
   const authMode = await select<"oauth" | "apikey">({
     message: "Select auth mode",
     choices: [
       { name: "OAuth (recommended)", value: "oauth" },
-      { name: "API Key", value: "apikey" }
+      { name: "API Key", value: "apikey" },
     ],
-    default: "oauth"
+    default: "oauth",
   });
 
   let llmApiBaseUrl = "https://api.openai.com/v1";
@@ -470,7 +420,7 @@ async function runSetup(options: SetupOptions) {
     llmApiBaseUrl = assertNonEmpty(
       (await input({ message: "LLM API base URL", default: "https://api.openai.com/v1" })) ||
         "https://api.openai.com/v1",
-      "llm_api_base_url"
+      "llm_api_base_url",
     );
   }
 
@@ -481,7 +431,7 @@ async function runSetup(options: SetupOptions) {
     const model = await pickDefaultModel({
       message: "Select default model",
       authMode: "apikey",
-      defaultModel: "gpt-5-codex"
+      defaultModel: "gpt-5-codex",
     });
     const effort = await pickEffort("medium");
 
@@ -492,14 +442,14 @@ async function runSetup(options: SetupOptions) {
       llmApiBaseUrl,
       model,
       effort,
-      apiKey: { key }
+      apiKey: { key },
     };
   } else {
     const oauth = await collectOAuthConfig(options);
     const model = await pickDefaultModel({
       message: "Select default model (OAuth verified)",
       authMode: "oauth",
-      defaultModel: "gpt-5.3-codex"
+      defaultModel: "gpt-5.3-codex",
     });
     const effort = await pickEffort("medium");
 
@@ -510,7 +460,7 @@ async function runSetup(options: SetupOptions) {
       llmApiBaseUrl,
       model,
       effort,
-      oauth
+      oauth,
     };
   }
 
@@ -519,137 +469,6 @@ async function runSetup(options: SetupOptions) {
   console.log("Next: reviewflux daemon start");
 }
 
-function resolveApiKeyForDaemon(cfg: ReviewFluxConfig): string {
-  if (cfg.authMode === "oauth" && cfg.oauth?.accessToken) {
-    return cfg.oauth.accessToken;
-  }
-  if (cfg.authMode === "apikey" && cfg.apiKey?.key?.trim()) {
-    return cfg.apiKey.key.trim();
-  }
-  throw new Error("daemon_missing_credentials");
+export async function runSetupCommand(args: string[]): Promise<void> {
+  await runSetup(parseSetupOptions(args));
 }
-
-async function runDaemonStart() {
-  const cfg = loadConfig();
-  console.log("[reviewflux] daemon start");
-
-  if (
-    cfg.authMode === "oauth" &&
-    cfg.oauth?.accessToken &&
-    cfg.oauth.expiresAtEpochMs &&
-    cfg.oauth.refreshToken &&
-    cfg.oauth.tokenUrl &&
-    cfg.oauth.clientId &&
-    Date.now() >= cfg.oauth.expiresAtEpochMs - 10_000
-  ) {
-    console.log("[reviewflux] access token expired soon. refreshing...");
-    const token = await refreshOAuthToken({
-      tokenUrl: cfg.oauth.tokenUrl,
-      clientId: cfg.oauth.clientId,
-      refreshToken: cfg.oauth.refreshToken
-    });
-    cfg.oauth.accessToken = token.accessToken;
-    cfg.oauth.refreshToken = token.refreshToken ?? cfg.oauth.refreshToken;
-    cfg.oauth.tokenType = token.tokenType ?? cfg.oauth.tokenType;
-    cfg.oauth.expiresAtEpochMs = token.expiresInSec ? Date.now() + token.expiresInSec * 1000 : undefined;
-    saveConfig(cfg);
-  }
-
-  const apiKey = resolveApiKeyForDaemon(cfg);
-
-  console.log("[reviewflux] waiting 3 seconds before test request...");
-  await wait(3000);
-
-  const selectedModel = cfg.model || cfg.models?.[0];
-  if (!selectedModel) {
-    console.error("[reviewflux] no model configured. run: reviewflux setup");
-    process.exit(1);
-  }
-
-  try {
-    const modelProvider = cfg.authMode === "oauth" ? "openai-codex" : "openai";
-    const effort = cfg.effort ?? "medium";
-    console.log(`[reviewflux] testing model: ${selectedModel} (provider=${modelProvider}, effort=${effort})`);
-    const model = getModel(modelProvider, selectedModel as never);
-    if (!model) {
-      throw new Error(`model_not_supported:${modelProvider}/${selectedModel}`);
-    }
-    const modelWithBaseUrl =
-      modelProvider === "openai-codex"
-        ? model
-        : {
-            ...model,
-            baseUrl: cfg.llmApiBaseUrl.replace(/\/$/, "")
-          };
-
-    const result = await completeSimple(
-      modelWithBaseUrl,
-      {
-        systemPrompt: "You are a helpful assistant.",
-        messages: [{ role: "user", content: "안녕?", timestamp: Date.now() }]
-      },
-      { apiKey, maxTokens: 256, reasoning: effort }
-    );
-
-    const text = result.content
-      .filter((item): item is { type: "text"; text: string } => item.type === "text")
-      .map((item) => item.text)
-      .join("\n")
-      .trim();
-
-    if (result.stopReason === "error") {
-      console.error("[reviewflux] model returned error response");
-      console.error(result.errorMessage ?? "unknown_model_error");
-      process.exit(1);
-    }
-
-    console.log("[reviewflux] response:");
-    if (text.length > 0) {
-      console.log(text);
-    } else {
-      console.log("(no text block returned)");
-      console.log(
-        `[reviewflux] stopReason=${result.stopReason}, contentTypes=${result.content.map((item) => item.type).join(",")}`
-      );
-      console.log("[reviewflux] raw content:");
-      console.log(JSON.stringify(result.content, null, 2));
-    }
-  } catch (error) {
-    console.error("[reviewflux] request failed (pi-ai)");
-    console.error(error instanceof Error ? error.message : String(error));
-    process.exit(1);
-  }
-}
-
-async function main() {
-  const args = process.argv.slice(2);
-  const [cmd, subcmd, ...rest] = args;
-
-  if (!cmd || cmd === "--help" || cmd === "-h") {
-    printHelp();
-    return;
-  }
-
-  if (cmd === "setup") {
-    await runSetup(parseSetupOptions(args.slice(1)));
-    return;
-  }
-
-  if (cmd === "daemon" && subcmd === "start") {
-    await runDaemonStart();
-    return;
-  }
-
-  if (cmd === "daemon" && subcmd === "install") {
-    console.log("[reviewflux] daemon install placeholder (service manager wiring will be added).");
-    return;
-  }
-
-  printHelp();
-  process.exitCode = 1;
-}
-
-main().catch((error) => {
-  console.error("[reviewflux] fatal", error);
-  process.exit(1);
-});

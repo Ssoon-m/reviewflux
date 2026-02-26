@@ -1,4 +1,4 @@
-import { OAuthTokenProvider } from "./oauth-token-provider.js";
+import { OAuthTokenProvider } from "../auth/oauth-token-provider.js";
 
 export type ChatInput = { role: "system" | "user" | "assistant"; content: string };
 
