@@ -1,5 +1,6 @@
 import { setTimeout as wait } from "node:timers/promises";
-import { completeSimple, getModel } from "@mariozechner/pi-ai";
+import { Agent } from "@mariozechner/pi-agent-core";
+import { getModel } from "@mariozechner/pi-ai";
 import { loadConfig, saveConfig, type ReviewFluxConfig } from "../../cli/config.js";
 
 type OAuthTokenResponse = {
@@ -75,6 +76,24 @@ async function refreshOAuthToken(params: {
   };
 }
 
+function extractAssistantText(messages: unknown[]): string {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index] as { role?: string; content?: Array<{ type?: string; text?: string }> };
+    if (message?.role !== "assistant" || !Array.isArray(message.content)) {
+      continue;
+    }
+    const text = message.content
+      .filter((item) => item?.type === "text" && typeof item.text === "string")
+      .map((item) => item.text ?? "")
+      .join("\n")
+      .trim();
+    if (text.length > 0) {
+      return text;
+    }
+  }
+  return "";
+}
+
 export async function runDaemonStartCommand(): Promise<void> {
   const cfg = loadConfig();
   console.log("[reviewflux] daemon start");
@@ -128,37 +147,26 @@ export async function runDaemonStartCommand(): Promise<void> {
             baseUrl: cfg.llmApiBaseUrl.replace(/\/$/, ""),
           };
 
-    const result = await completeSimple(
-      modelWithBaseUrl,
-      {
-        systemPrompt: "You are a helpful assistant.",
-        messages: [{ role: "user", content: "안녕?", timestamp: Date.now() }],
-      },
-      { apiKey, maxTokens: 256, reasoning: effort },
-    );
+    const agent = new Agent({
+      getApiKey: async () => apiKey,
+    });
+    agent.setSystemPrompt("You are a helpful assistant.");
+    agent.setModel(modelWithBaseUrl);
+    agent.setThinkingLevel(effort);
 
-    const text = result.content
-      .filter((item): item is { type: "text"; text: string } => item.type === "text")
-      .map((item) => item.text)
-      .join("\n")
-      .trim();
+    await agent.prompt("안녕?");
 
-    if (result.stopReason === "error") {
-      console.error("[reviewflux] model returned error response");
-      console.error(result.errorMessage ?? "unknown_model_error");
-      process.exit(1);
-    }
+    const text = extractAssistantText(agent.state.messages as unknown[]);
 
     console.log("[reviewflux] response:");
     if (text.length > 0) {
       console.log(text);
     } else {
       console.log("(no text block returned)");
-      console.log(
-        `[reviewflux] stopReason=${result.stopReason}, contentTypes=${result.content.map((item) => item.type).join(",")}`,
-      );
-      console.log("[reviewflux] raw content:");
-      console.log(JSON.stringify(result.content, null, 2));
+      console.log("[reviewflux] message roles:");
+      console.log(agent.state.messages.map((message) => (message as { role?: string }).role).join(","));
+      console.log("[reviewflux] raw messages:");
+      console.log(JSON.stringify(agent.state.messages, null, 2));
     }
   } catch (error) {
     console.error("[reviewflux] request failed (pi-ai)");
