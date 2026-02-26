@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { normalizeRepoKey, resolveModel, type RoutingConfig } from "../src/llm/model-routing.js";
+import { ModelRouter, normalizeRepoKey, resolveModel, type RoutingConfig } from "../src/llm/model-routing.js";
 
 describe("model routing", () => {
   const config: RoutingConfig = {
@@ -20,6 +20,8 @@ describe("model routing", () => {
   };
 
   it("uses global default when no repo/task override exists", () => {
+    const router = new ModelRouter(config);
+    expect(router.resolve()).toEqual({ provider: "openai-codex", model: "gpt-5.3-codex" });
     expect(resolveModel(config)).toEqual({ provider: "openai-codex", model: "gpt-5.3-codex" });
   });
 
