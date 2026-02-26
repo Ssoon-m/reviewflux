@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { printHelp } from "./legacy.js";
-import { runSetupCommand } from "../commands/setup.js";
+import { runSetupCommand } from "../commands/setup/index.js";
 import {
   runDaemonInstallCommand,
   runDaemonStartCommand,
