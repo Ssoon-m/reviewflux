@@ -11,9 +11,12 @@ importers:
       '@inquirer/prompts':
         specifier: ^7.9.0
         version: 7.10.1(@types/node@25.3.1)
+      '@mariozechner/pi-agent-core':
+        specifier: 0.55.1
+        version: 0.55.1(ws@8.19.0)(zod@4.3.6)
       '@mariozechner/pi-ai':
-        specifier: 0.54.1
-        version: 0.54.1(ws@8.19.0)(zod@4.3.6)
+        specifier: 0.55.1
+        version: 0.55.1(ws@8.19.0)(zod@4.3.6)
       dotenv:
         specifier: ^17.3.1
         version: 17.3.1
@@ -537,8 +540,12 @@ packages:
   '@jridgewell/trace-mapping@0.3.31':
     resolution: {integrity: sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw==}
 
-  '@mariozechner/pi-ai@0.54.1':
-    resolution: {integrity: sha512-tiVvoNQV+3dpWgRQ1U/3bwJoDVSYwL17BE/kc00nXmaSLAPwNZoxLagtQ+HBr/rGzkq5viOgQf2dk+ud+/4UCg==}
+  '@mariozechner/pi-agent-core@0.55.1':
+    resolution: {integrity: sha512-t9FAb4ouy8HJSIa8gSRC7j8oeUOb2XDdhvBiHj7FhfpYafj1vRPrvGIEXUV8fPJDCI07vhK9iztP27EPk+yEWw==}
+    engines: {node: '>=20.0.0'}
+
+  '@mariozechner/pi-ai@0.55.1':
+    resolution: {integrity: sha512-JJX1LrVWPUPMExu0f89XR4nMNP37+FNLjEE4cIHq9Hi6xQtOiiEi7OjDFMx58hWsq81xH1CwmQXqGTWBjbXKTw==}
     engines: {node: '>=20.0.0'}
     hasBin: true
 
@@ -2822,7 +2829,19 @@ snapshots:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.5.5
 
-  '@mariozechner/pi-ai@0.54.1(ws@8.19.0)(zod@4.3.6)':
+  '@mariozechner/pi-agent-core@0.55.1(ws@8.19.0)(zod@4.3.6)':
+    dependencies:
+      '@mariozechner/pi-ai': 0.55.1(ws@8.19.0)(zod@4.3.6)
+    transitivePeerDependencies:
+      - '@modelcontextprotocol/sdk'
+      - aws-crt
+      - bufferutil
+      - supports-color
+      - utf-8-validate
+      - ws
+      - zod
+
+  '@mariozechner/pi-ai@0.55.1(ws@8.19.0)(zod@4.3.6)':
     dependencies:
       '@anthropic-ai/sdk': 0.73.0(zod@4.3.6)
       '@aws-sdk/client-bedrock-runtime': 3.998.0
