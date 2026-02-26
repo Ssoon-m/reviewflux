@@ -62,7 +62,7 @@ describe("OpenAIApiKeyLlmClient", () => {
 });
 
 describe("GeminiLlmClient", () => {
-  it("calls native generateContent endpoint", async () => {
+  it("calls native generateContent endpoint with api key", async () => {
     const llmFetch = vi.fn(async (url: string, init?: RequestInit) => {
       expect(url).toContain("/models/gemini-2.5-flash:generateContent?key=gem-key");
       const body = JSON.parse(String(init?.body)) as { contents: Array<{ role: string; parts: Array<{ text: string }> }> };
@@ -75,6 +75,7 @@ describe("GeminiLlmClient", () => {
 
     const client = new GeminiLlmClient(
       {
+        authMode: "apikey",
         baseUrl: "https://generativelanguage.googleapis.com/v1beta",
         model: "gemini-2.5-flash",
         apiKey: "gem-key",
@@ -123,6 +124,36 @@ describe("createLlmProvider", () => {
     });
 
     expect(provider).toBeInstanceOf(GeminiLlmClient);
+  });
+
+  it("creates gemini oauth provider implementation", async () => {
+    const tokenProvider = new OAuthTokenProvider(
+      {
+        tokenUrl: "https://auth.example.com/token",
+        clientId: "id",
+        clientSecret: "secret",
+      },
+      vi.fn(async () => new Response(JSON.stringify({ access_token: "gem-oauth", expires_in: 3600 }), { status: 200 })) as unknown as typeof fetch,
+    );
+
+    const llmFetch = vi.fn(async (_url: string, init?: RequestInit) => {
+      expect(init?.headers).toMatchObject({ authorization: "Bearer gem-oauth" });
+      return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: "ok" }] } }] }), { status: 200 });
+    });
+
+    const provider = createLlmProvider(
+      {
+        authMode: "oauth",
+        provider: "gemini",
+        baseUrl: "https://generativelanguage.googleapis.com/v1beta",
+        model: "gemini-2.5-pro",
+        tokenProvider,
+      },
+      llmFetch as unknown as typeof fetch,
+    );
+
+    expect(provider).toBeInstanceOf(GeminiLlmClient);
+    await expect(provider.generateReply([{ role: "user", content: "hi" }])).resolves.toBe("ok");
   });
 });
 

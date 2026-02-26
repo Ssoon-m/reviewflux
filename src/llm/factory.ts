@@ -41,7 +41,9 @@ export class GeminiLlmClient implements LlmProvider {
   private readonly inner: GeminiNativeClient;
 
   constructor(
-    options: { baseUrl: string; model: string; timeoutMs?: number; apiKey: string },
+    options:
+      | { baseUrl: string; model: string; timeoutMs?: number; apiKey: string; authMode: "apikey" }
+      | { baseUrl: string; model: string; timeoutMs?: number; accessTokenProvider: () => Promise<string>; authMode: "oauth" },
     fetchImpl: typeof fetch = fetch,
   ) {
     this.inner = new GeminiNativeClient(options, fetchImpl);
@@ -55,7 +57,7 @@ export class GeminiLlmClient implements LlmProvider {
 export type LlmProviderFactoryInput =
   | {
       authMode: "oauth";
-      provider: "openai";
+      provider: "openai" | "gemini";
       baseUrl: string;
       model: string;
       timeoutMs?: number;
@@ -72,11 +74,24 @@ export type LlmProviderFactoryInput =
 
 export function createLlmProvider(input: LlmProviderFactoryInput, fetchImpl: typeof fetch = fetch): LlmProvider {
   if (input.authMode === "oauth") {
+    if (input.provider === "gemini") {
+      return new GeminiLlmClient(
+        {
+          authMode: "oauth",
+          baseUrl: input.baseUrl,
+          model: input.model,
+          timeoutMs: input.timeoutMs,
+          accessTokenProvider: () => input.tokenProvider.getAccessToken(),
+        },
+        fetchImpl,
+      );
+    }
+
     return new OAuthLlmClient(input, fetchImpl);
   }
 
   if (input.provider === "gemini") {
-    return new GeminiLlmClient(input, fetchImpl);
+    return new GeminiLlmClient({ ...input, authMode: "apikey" }, fetchImpl);
   }
 
   return new OpenAIApiKeyLlmClient(input, fetchImpl);

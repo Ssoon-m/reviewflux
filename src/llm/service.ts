@@ -15,13 +15,9 @@ export function createLlmService(config: AppConfig): LlmProvider {
   const modelRef = resolveModelRef({ raw: config.LLM_MODEL, defaultProvider: config.LLM_PROVIDER, aliases });
 
   if (config.LLM_AUTH_MODE === "oauth") {
-    if (modelRef.provider !== "openai") {
-      throw new Error("oauth_provider_not_supported_for_model");
-    }
-
     return createLlmProvider({
       authMode: "oauth",
-      provider: "openai",
+      provider: modelRef.provider,
       baseUrl: config.LLM_API_BASE_URL,
       model: modelRef.model,
       timeoutMs: config.LLM_TIMEOUT_MS,

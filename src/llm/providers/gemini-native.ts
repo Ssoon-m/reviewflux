@@ -3,9 +3,9 @@ import type { ChatInput } from "../types.js";
 type GeminiNativeClientOptions = {
   baseUrl: string;
   model: string;
-  apiKey: string;
   timeoutMs?: number;
-};
+} &
+  ({ authMode: "apikey"; apiKey: string } | { authMode: "oauth"; accessTokenProvider: () => Promise<string> });
 
 export class GeminiNativeClient {
   constructor(
@@ -33,11 +33,20 @@ export class GeminiNativeClient {
         ? [{ role: "user", parts: [{ text: `[SYSTEM]\n${system}` }] }, ...conversation]
         : conversation;
 
-      const endpoint = `${this.options.baseUrl.replace(/\/$/, "")}/models/${this.options.model}:generateContent?key=${encodeURIComponent(this.options.apiKey)}`;
+      const base = `${this.options.baseUrl.replace(/\/$/, "")}/models/${this.options.model}:generateContent`;
+      const endpoint =
+        this.options.authMode === "apikey"
+          ? `${base}?key=${encodeURIComponent(this.options.apiKey)}`
+          : base;
+
+      const authHeader =
+        this.options.authMode === "oauth"
+          ? { authorization: `Bearer ${await this.options.accessTokenProvider()}` }
+          : {};
 
       const res = await this.fetchImpl(endpoint, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", ...authHeader },
         body: JSON.stringify({ contents }),
         signal: ctrl.signal,
       });
