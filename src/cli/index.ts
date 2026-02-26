@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { printHelp } from "./legacy.js";
+import { printHelp, runHelpCommand } from "../commands/help/index.js";
 import { runSetupCommand } from "../commands/setup/index.js";
 import {
   runDaemonInstallCommand,
@@ -13,7 +13,12 @@ async function main() {
   const [cmd, subcmd] = args;
 
   if (!cmd || cmd === "--help" || cmd === "-h") {
-    printHelp();
+    await runHelpCommand();
+    return;
+  }
+
+  if (cmd === "help") {
+    await runHelpCommand();
     return;
   }
 

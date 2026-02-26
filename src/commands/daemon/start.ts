@@ -1,5 +1,168 @@
-import { runDaemonStart } from "../../cli/legacy.js";
+import { setTimeout as wait } from "node:timers/promises";
+import { completeSimple, getModel } from "@mariozechner/pi-ai";
+import { loadConfig, saveConfig, type ReviewFluxConfig } from "../../cli/config.js";
+
+type OAuthTokenResponse = {
+  accessToken: string;
+  refreshToken?: string;
+  tokenType?: string;
+  expiresInSec?: number;
+};
+
+function resolveApiKeyForDaemon(cfg: ReviewFluxConfig): string {
+  if (cfg.authMode === "oauth" && cfg.oauth?.accessToken) {
+    return cfg.oauth.accessToken;
+  }
+  if (cfg.authMode === "apikey" && cfg.apiKey?.key?.trim()) {
+    return cfg.apiKey.key.trim();
+  }
+  throw new Error("daemon_missing_credentials");
+}
+
+async function fetchTextWithTimeout(
+  url: string,
+  init: RequestInit,
+  timeoutMs = 30_000,
+): Promise<{ status: number; ok: boolean; text: string }> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, { ...init, signal: ctrl.signal });
+    const text = await res.text();
+    return { status: res.status, ok: res.ok, text };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function refreshOAuthToken(params: {
+  tokenUrl: string;
+  clientId: string;
+  refreshToken: string;
+}): Promise<OAuthTokenResponse> {
+  const body = new URLSearchParams({
+    grant_type: "refresh_token",
+    refresh_token: params.refreshToken,
+    client_id: params.clientId,
+  });
+
+  const rawRes = await fetchTextWithTimeout(
+    params.tokenUrl,
+    {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body,
+    },
+    30_000,
+  );
+
+  if (!rawRes.ok) throw new Error(`oauth_refresh_failed (${rawRes.status}): ${rawRes.text}`);
+
+  const json = JSON.parse(rawRes.text) as {
+    access_token?: string;
+    refresh_token?: string;
+    token_type?: string;
+    expires_in?: number;
+  };
+
+  if (!json.access_token) throw new Error("oauth_refresh_missing_access_token");
+
+  return {
+    accessToken: json.access_token,
+    refreshToken: json.refresh_token,
+    tokenType: json.token_type,
+    expiresInSec: json.expires_in,
+  };
+}
 
 export async function runDaemonStartCommand(): Promise<void> {
-  await runDaemonStart();
+  const cfg = loadConfig();
+  console.log("[reviewflux] daemon start");
+
+  if (
+    cfg.authMode === "oauth" &&
+    cfg.oauth?.accessToken &&
+    cfg.oauth.expiresAtEpochMs &&
+    cfg.oauth.refreshToken &&
+    cfg.oauth.tokenUrl &&
+    cfg.oauth.clientId &&
+    Date.now() >= cfg.oauth.expiresAtEpochMs - 10_000
+  ) {
+    console.log("[reviewflux] access token expired soon. refreshing...");
+    const token = await refreshOAuthToken({
+      tokenUrl: cfg.oauth.tokenUrl,
+      clientId: cfg.oauth.clientId,
+      refreshToken: cfg.oauth.refreshToken,
+    });
+    cfg.oauth.accessToken = token.accessToken;
+    cfg.oauth.refreshToken = token.refreshToken ?? cfg.oauth.refreshToken;
+    cfg.oauth.tokenType = token.tokenType ?? cfg.oauth.tokenType;
+    cfg.oauth.expiresAtEpochMs = token.expiresInSec ? Date.now() + token.expiresInSec * 1000 : undefined;
+    saveConfig(cfg);
+  }
+
+  const apiKey = resolveApiKeyForDaemon(cfg);
+
+  console.log("[reviewflux] waiting 3 seconds before test request...");
+  await wait(3000);
+
+  const selectedModel = cfg.model || cfg.models?.[0];
+  if (!selectedModel) {
+    console.error("[reviewflux] no model configured. run: reviewflux setup");
+    process.exit(1);
+  }
+
+  try {
+    const modelProvider = cfg.authMode === "oauth" ? "openai-codex" : "openai";
+    const effort = cfg.effort ?? "medium";
+    console.log(`[reviewflux] testing model: ${selectedModel} (provider=${modelProvider}, effort=${effort})`);
+    const model = getModel(modelProvider, selectedModel as never);
+    if (!model) {
+      throw new Error(`model_not_supported:${modelProvider}/${selectedModel}`);
+    }
+    const modelWithBaseUrl =
+      modelProvider === "openai-codex"
+        ? model
+        : {
+            ...model,
+            baseUrl: cfg.llmApiBaseUrl.replace(/\/$/, ""),
+          };
+
+    const result = await completeSimple(
+      modelWithBaseUrl,
+      {
+        systemPrompt: "You are a helpful assistant.",
+        messages: [{ role: "user", content: "안녕?", timestamp: Date.now() }],
+      },
+      { apiKey, maxTokens: 256, reasoning: effort },
+    );
+
+    const text = result.content
+      .filter((item): item is { type: "text"; text: string } => item.type === "text")
+      .map((item) => item.text)
+      .join("\n")
+      .trim();
+
+    if (result.stopReason === "error") {
+      console.error("[reviewflux] model returned error response");
+      console.error(result.errorMessage ?? "unknown_model_error");
+      process.exit(1);
+    }
+
+    console.log("[reviewflux] response:");
+    if (text.length > 0) {
+      console.log(text);
+    } else {
+      console.log("(no text block returned)");
+      console.log(
+        `[reviewflux] stopReason=${result.stopReason}, contentTypes=${result.content.map((item) => item.type).join(",")}`,
+      );
+      console.log("[reviewflux] raw content:");
+      console.log(JSON.stringify(result.content, null, 2));
+    }
+  } catch (error) {
+    console.error("[reviewflux] request failed (pi-ai)");
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exit(1);
+  }
 }
