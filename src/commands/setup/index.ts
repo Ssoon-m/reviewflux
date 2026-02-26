@@ -431,7 +431,7 @@ async function runSetup(options: SetupOptions): Promise<void> {
     default: provider === "gemini" ? "apikey" : "oauth",
   });
 
-  const defaultBaseUrl = provider === "gemini" ? "https://generativelanguage.googleapis.com/v1beta/openai" : "https://api.openai.com/v1";
+  const defaultBaseUrl = provider === "gemini" ? "https://generativelanguage.googleapis.com/v1beta" : "https://api.openai.com/v1";
   let llmApiBaseUrl = defaultBaseUrl;
 
   if (options.advanced) {

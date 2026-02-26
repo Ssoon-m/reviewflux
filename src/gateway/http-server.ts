@@ -23,7 +23,7 @@ export function createApp() {
   const llm =
     config.LLM_AUTH_MODE === "oauth"
       ? createLlmProvider({
-          mode: "oauth",
+          authMode: "oauth",
           provider: "openai",
           baseUrl: config.LLM_API_BASE_URL,
           model: config.LLM_MODEL,
@@ -38,7 +38,7 @@ export function createApp() {
           }),
         })
       : createLlmProvider({
-          mode: "apikey",
+          authMode: "apikey",
           provider: config.LLM_PROVIDER,
           baseUrl: config.LLM_API_BASE_URL,
           model: config.LLM_MODEL,
