@@ -6,6 +6,7 @@ const schema = z
     LLM_AUTH_MODE: z.enum(["oauth", "apikey"]).default("oauth"),
     LLM_API_KEY: z.string().optional(),
     LLM_MODEL_ALIASES_JSON: z.string().optional(),
+    LLM_ALLOWED_MODELS: z.string().optional(),
 
     OAUTH_TOKEN_URL: z.string().url().optional(),
     OAUTH_CLIENT_ID: z.string().optional(),
@@ -31,9 +32,6 @@ const schema = z
       }
     }
 
-    if (value.LLM_AUTH_MODE === "apikey" && !value.LLM_API_KEY) {
-      ctx.addIssue({ code: "custom", path: ["LLM_API_KEY"], message: "required_when_apikey" });
-    }
   });
 
 export type AppConfig = z.infer<typeof schema>;
