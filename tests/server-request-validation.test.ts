@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { getClientErrorCode, parseModelAliasesJson, parsePromptText } from "../src/gateway/http-server.js";
+import { getClientErrorCode, parsePromptText } from "../src/gateway/http-server.js";
+import { parseModelAliasesJson } from "../src/llm/service.js";
 
 describe("parsePromptText", () => {
   it("accepts non-empty strings", () => {
