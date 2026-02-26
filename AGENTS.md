@@ -46,8 +46,19 @@ Each directory should represent a stable domain boundary.
 - **Responsibility:** runtime environment configuration schema and parsing.
 - **Must contain:** env schema, validation, config shaping for runtime.
 
+### `src/lib/`
+- **Responsibility:** domain-agnostic reusable modules with high internal cohesion.
+- **Rule:** `lib` is not a dump folder. Group by cohesive capability (e.g., `lib/async`, `lib/text`, `lib/net`, `lib/validate`).
+- **Rule:** modules in `lib` should be independently reusable and testable.
+- **Must NOT contain:** domain language (`oauth`, `daemon`, `github`, `review`, etc.). If domain terms appear, move the logic back to its domain directory.
+- **Promotion criteria (all recommended):**
+  - reused in 2+ domains,
+  - minimal external dependencies,
+  - easy unit testing,
+  - clear single-purpose naming.
+
 ### `src/infra/` (future)
-- **Responsibility:** cross-cutting utilities (logging, retry, fs helpers, process wrappers).
+- **Responsibility:** cross-cutting operational utilities (logging, retry policy wiring, process wrappers).
 - **Rule:** keep infra generic; do not leak command/domain assumptions.
 
 ### `src/types/` (future)
