@@ -2,12 +2,12 @@
   "name": "reviewflux",
   "version": "1.0.0",
   "description": "CLI-first event-driven review runtime",
-  "main": "dist/gateway/http-server.js",
+  "main": "dist/gateway/http-server.mjs",
   "bin": {
-    "reviewflux": "dist/cli/index.js"
+    "reviewflux": "dist/cli/index.mjs"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsdown",
     "check": "tsc --noEmit -p tsconfig.json",
     "dev": "node scripts/run-node.mjs",
     "reviewflux": "node scripts/run-node.mjs",
@@ -37,6 +37,7 @@
     "@types/express": "^5.0.6",
     "@types/node": "^25.3.0",
     "tsx": "^4.21.0",
+    "tsdown": "^0.20.3",
     "typescript": "^5.9.3",
     "vitest": "^4.0.18"
   },

@@ -8,7 +8,7 @@ const cwd = process.cwd();
 const rawArgs = process.argv.slice(2);
 const args = rawArgs[0] === "--" ? rawArgs.slice(1) : rawArgs;
 
-const distEntry = path.join(cwd, "dist", "cli", "index.js");
+const distEntry = path.join(cwd, "dist", "cli", "index.mjs");
 const srcRoot = path.join(cwd, "src");
 const watchFiles = [path.join(cwd, "package.json"), path.join(cwd, "tsconfig.json")];
 
