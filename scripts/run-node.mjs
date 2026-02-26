@@ -8,7 +8,7 @@ const cwd = process.cwd();
 const rawArgs = process.argv.slice(2);
 const args = rawArgs[0] === "--" ? rawArgs.slice(1) : rawArgs;
 
-const distEntry = path.join(cwd, "dist", "cli", "index.js");
+const distEntry = path.join(cwd, "dist", "cli", "index.mjs");
 const srcRoot = path.join(cwd, "src");
 const watchFiles = [path.join(cwd, "package.json"), path.join(cwd, "tsconfig.json")];
 
@@ -80,8 +80,10 @@ async function buildIfNeeded() {
 
   process.stderr.write("[reviewflux] Building TypeScript (dist is stale).\n");
   const isWindows = process.platform === "win32";
-  const command = isWindows ? "cmd.exe" : "pnpm";
-  const commandArgs = isWindows ? ["/d", "/s", "/c", "pnpm", "build"] : ["build"];
+  const command = isWindows ? "cmd.exe" : "corepack";
+  const commandArgs = isWindows
+    ? ["/d", "/s", "/c", "corepack", "pnpm", "build"]
+    : ["pnpm", "build"];
   const res = await run(command, commandArgs);
   if (res.signal) return 1;
   return res.code ?? 1;
