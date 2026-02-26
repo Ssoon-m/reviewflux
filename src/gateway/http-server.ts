@@ -5,7 +5,7 @@ import { realpathSync } from "node:fs";
 import { resolve } from "node:path";
 import { readConfig } from "../config/env.js";
 import { OAuthTokenProvider } from "../auth/oauth-token-provider.js";
-import { createLlmProvider } from "../llm/client.js";
+import { createLlmProvider, resolveModelRef, type ModelAliasMap } from "../llm/client.js";
 
 export function parsePromptText(input: unknown): string | null {
   if (typeof input !== "string") return null;
@@ -17,31 +17,49 @@ export function getClientErrorCode(_error: unknown): string {
   return "internal_error";
 }
 
+export function parseModelAliasesJson(raw?: string): ModelAliasMap {
+  if (!raw?.trim()) return {};
+  const parsed = JSON.parse(raw) as Record<string, { provider: "openai" | "gemini"; model: string }>;
+  const entries = Object.entries(parsed).map(([alias, target]) => [alias.toLowerCase(), target] as const);
+  return Object.fromEntries(entries);
+}
+
 export function createApp() {
   const config = readConfig();
+  const modelAliases = parseModelAliasesJson(config.LLM_MODEL_ALIASES_JSON);
+  const modelRef = resolveModelRef({
+    raw: config.LLM_MODEL,
+    defaultProvider: config.LLM_PROVIDER,
+    aliases: modelAliases,
+  });
 
   const llm =
     config.LLM_AUTH_MODE === "oauth"
-      ? createLlmProvider({
-          authMode: "oauth",
-          provider: "openai",
-          baseUrl: config.LLM_API_BASE_URL,
-          model: config.LLM_MODEL,
-          timeoutMs: config.LLM_TIMEOUT_MS,
-          tokenProvider: new OAuthTokenProvider({
-            tokenUrl: config.OAUTH_TOKEN_URL!,
-            clientId: config.OAUTH_CLIENT_ID!,
-            clientSecret: config.OAUTH_CLIENT_SECRET!,
-            scope: config.OAUTH_SCOPE,
-            audience: config.OAUTH_AUDIENCE,
+      ? (() => {
+          if (modelRef.provider !== "openai") {
+            throw new Error("oauth_provider_not_supported_for_model");
+          }
+          return createLlmProvider({
+            authMode: "oauth",
+            provider: "openai",
+            baseUrl: config.LLM_API_BASE_URL,
+            model: modelRef.model,
             timeoutMs: config.LLM_TIMEOUT_MS,
-          }),
-        })
+            tokenProvider: new OAuthTokenProvider({
+              tokenUrl: config.OAUTH_TOKEN_URL!,
+              clientId: config.OAUTH_CLIENT_ID!,
+              clientSecret: config.OAUTH_CLIENT_SECRET!,
+              scope: config.OAUTH_SCOPE,
+              audience: config.OAUTH_AUDIENCE,
+              timeoutMs: config.LLM_TIMEOUT_MS,
+            }),
+          });
+        })()
       : createLlmProvider({
           authMode: "apikey",
-          provider: config.LLM_PROVIDER,
+          provider: modelRef.provider,
           baseUrl: config.LLM_API_BASE_URL,
-          model: config.LLM_MODEL,
+          model: modelRef.model,
           timeoutMs: config.LLM_TIMEOUT_MS,
           apiKey: config.LLM_API_KEY!,
         });

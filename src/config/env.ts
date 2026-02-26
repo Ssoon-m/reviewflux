@@ -5,6 +5,7 @@ const schema = z
     LLM_PROVIDER: z.enum(["openai", "gemini"]).default("openai"),
     LLM_AUTH_MODE: z.enum(["oauth", "apikey"]).default("oauth"),
     LLM_API_KEY: z.string().optional(),
+    LLM_MODEL_ALIASES_JSON: z.string().optional(),
 
     OAUTH_TOKEN_URL: z.string().url().optional(),
     OAUTH_CLIENT_ID: z.string().optional(),

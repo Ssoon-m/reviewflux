@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getClientErrorCode, parsePromptText } from "../src/gateway/http-server.js";
+import { getClientErrorCode, parseModelAliasesJson, parsePromptText } from "../src/gateway/http-server.js";
 
 describe("parsePromptText", () => {
   it("accepts non-empty strings", () => {
@@ -19,5 +19,10 @@ describe("parsePromptText", () => {
   it("maps server-side failures to stable client error code", () => {
     expect(getClientErrorCode(new Error("llm_request_failed (500): sensitive details"))).toBe("internal_error");
     expect(getClientErrorCode("anything")).toBe("internal_error");
+  });
+
+  it("parses model aliases JSON with lowercase keys", () => {
+    const aliases = parseModelAliasesJson('{"FAST":{"provider":"gemini","model":"gemini-2.5-flash"}}');
+    expect(aliases.fast).toEqual({ provider: "gemini", model: "gemini-2.5-flash" });
   });
 });
