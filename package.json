@@ -8,8 +8,11 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "dev": "tsx src/cli/index.ts",
-    "test": "vitest run"
+    "check": "tsc --noEmit -p tsconfig.json",
+    "dev": "node scripts/run-node.mjs",
+    "reviewflux": "node scripts/run-node.mjs",
+    "test": "vitest run",
+    "test:all": "pnpm build && pnpm check && pnpm test"
   },
   "repository": {
     "type": "git",
