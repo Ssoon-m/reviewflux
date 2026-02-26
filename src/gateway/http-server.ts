@@ -20,22 +20,31 @@ export function getClientErrorCode(_error: unknown): string {
 export function createApp() {
   const config = readConfig();
 
-  const tokenProvider = new OAuthTokenProvider({
-    tokenUrl: config.OAUTH_TOKEN_URL,
-    clientId: config.OAUTH_CLIENT_ID,
-    clientSecret: config.OAUTH_CLIENT_SECRET,
-    scope: config.OAUTH_SCOPE,
-    audience: config.OAUTH_AUDIENCE,
-    timeoutMs: config.LLM_TIMEOUT_MS
-  });
-
-  const llm = createLlmProvider({
-    mode: "oauth",
-    baseUrl: config.LLM_API_BASE_URL,
-    model: config.LLM_MODEL,
-    timeoutMs: config.LLM_TIMEOUT_MS,
-    tokenProvider,
-  });
+  const llm =
+    config.LLM_AUTH_MODE === "oauth"
+      ? createLlmProvider({
+          mode: "oauth",
+          provider: "openai",
+          baseUrl: config.LLM_API_BASE_URL,
+          model: config.LLM_MODEL,
+          timeoutMs: config.LLM_TIMEOUT_MS,
+          tokenProvider: new OAuthTokenProvider({
+            tokenUrl: config.OAUTH_TOKEN_URL!,
+            clientId: config.OAUTH_CLIENT_ID!,
+            clientSecret: config.OAUTH_CLIENT_SECRET!,
+            scope: config.OAUTH_SCOPE,
+            audience: config.OAUTH_AUDIENCE,
+            timeoutMs: config.LLM_TIMEOUT_MS,
+          }),
+        })
+      : createLlmProvider({
+          mode: "apikey",
+          provider: config.LLM_PROVIDER,
+          baseUrl: config.LLM_API_BASE_URL,
+          model: config.LLM_MODEL,
+          timeoutMs: config.LLM_TIMEOUT_MS,
+          apiKey: config.LLM_API_KEY!,
+        });
 
   const app = express();
   app.use(express.json());

@@ -1,6 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 import { OAuthTokenProvider } from "../src/auth/oauth-token-provider.js";
-import { ApiKeyLlmClient, OAuthLlmClient, createLlmProvider } from "../src/llm/client.js";
+import {
+  ApiKeyLlmClient,
+  GeminiLlmClient,
+  OAuthLlmClient,
+  OpenAIApiKeyLlmClient,
+  createLlmProvider,
+} from "../src/llm/client.js";
 
 describe("OAuthLlmClient", () => {
   it("uses bearer token and returns content", async () => {
@@ -109,11 +115,25 @@ describe("createLlmProvider", () => {
   it("creates api key provider implementation", () => {
     const provider = createLlmProvider({
       mode: "apikey",
+      provider: "openai",
       baseUrl: "https://llm.example.com/v1",
       model: "demo-model",
       apiKey: "key-123",
     });
 
+    expect(provider).toBeInstanceOf(OpenAIApiKeyLlmClient);
     expect(provider).toBeInstanceOf(ApiKeyLlmClient);
+  });
+
+  it("creates gemini provider implementation", () => {
+    const provider = createLlmProvider({
+      mode: "apikey",
+      provider: "gemini",
+      baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai",
+      model: "gemini-2.5-flash",
+      apiKey: "key-123",
+    });
+
+    expect(provider).toBeInstanceOf(GeminiLlmClient);
   });
 });

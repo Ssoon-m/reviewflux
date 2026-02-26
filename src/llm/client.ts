@@ -6,6 +6,8 @@ export interface LlmProvider {
   generateReply(messages: ChatInput[]): Promise<string>;
 }
 
+export type LlmProviderName = "openai" | "gemini";
+
 type HttpClientOptions = {
   baseUrl: string;
   model: string;
@@ -80,10 +82,10 @@ export class OAuthLlmClient implements LlmProvider {
 }
 
 export class ApiKeyLlmClient implements LlmProvider {
-  private readonly inner: OpenAICompatibleClient;
+  protected readonly inner: OpenAICompatibleClient;
 
   constructor(
-    private readonly options: HttpClientOptions & {
+    protected readonly options: HttpClientOptions & {
       apiKey: string;
     },
     fetchImpl: typeof fetch = fetch,
@@ -96,14 +98,22 @@ export class ApiKeyLlmClient implements LlmProvider {
   }
 }
 
+export class GeminiLlmClient extends ApiKeyLlmClient {}
+
+export class OpenAIApiKeyLlmClient extends ApiKeyLlmClient {}
+
 export type LlmProviderFactoryInput =
-  | ({ mode: "oauth"; tokenProvider: OAuthTokenProvider } & HttpClientOptions)
-  | ({ mode: "apikey"; apiKey: string } & HttpClientOptions);
+  | ({ mode: "oauth"; provider?: "openai"; tokenProvider: OAuthTokenProvider } & HttpClientOptions)
+  | ({ mode: "apikey"; provider: LlmProviderName; apiKey: string } & HttpClientOptions);
 
 export function createLlmProvider(input: LlmProviderFactoryInput, fetchImpl: typeof fetch = fetch): LlmProvider {
   if (input.mode === "oauth") {
     return new OAuthLlmClient(input, fetchImpl);
   }
 
-  return new ApiKeyLlmClient(input, fetchImpl);
+  if (input.provider === "gemini") {
+    return new GeminiLlmClient(input, fetchImpl);
+  }
+
+  return new OpenAIApiKeyLlmClient(input, fetchImpl);
 }
