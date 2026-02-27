@@ -9,7 +9,7 @@ import {
   type LlmProvider,
   type ReviewFluxConfig,
 } from "../../cli/config.js";
-import { loginWithPiOAuth } from "../../auth/pi-oauth.js";
+import { loginWithPiOAuth, resolveOAuthProviderId } from "../../auth/pi-oauth.js";
 
 type SetupOptions = { advanced: boolean };
 
@@ -117,7 +117,38 @@ function openBrowser(url: string): boolean {
 }
 
 async function collectOAuthConfig(provider: LlmProvider): Promise<NonNullable<ReviewFluxConfig["oauth"]>> {
-  const oauth = await loginWithPiOAuth(provider, {
+  const oauthMode = await promptSelect<"browser" | "paste">({
+    message: "OAuth setup method",
+    options: [
+      { label: "Browser login (recommended)", value: "browser" },
+      { label: "Paste existing token", value: "paste" },
+    ],
+    initialValue: "browser",
+  });
+
+  if (oauthMode === "paste") {
+    const accessToken = assertNonEmpty(
+      await promptPassword({ message: "Paste OAuth access token", mask: "*" }),
+      "oauth_access_token",
+    );
+    const refreshTokenRaw = await promptPassword({ message: "Refresh token (optional)", mask: "*" });
+    const refreshToken = refreshTokenRaw.trim() || undefined;
+
+    const providerId = resolveOAuthProviderId(provider);
+    const projectIdRaw =
+      providerId === "google-gemini-cli"
+        ? await promptText({ message: "Google project ID (optional; needed for refresh)", initialValue: "" })
+        : "";
+
+    return {
+      oauthProviderId: providerId,
+      accessToken,
+      ...(refreshToken ? { refreshToken } : {}),
+      ...(projectIdRaw.trim() ? { projectId: projectIdRaw.trim() } : {}),
+    };
+  }
+
+  return loginWithPiOAuth(provider, {
     onAuth: ({ url }) => {
       console.log("\n[reviewflux] OAuth URL ready");
       console.log("Open this URL in your LOCAL browser:");
@@ -141,8 +172,6 @@ async function collectOAuthConfig(provider: LlmProvider): Promise<NonNullable<Re
       if (message?.trim()) console.log(`[reviewflux] ${message}`);
     },
   });
-
-  return oauth;
 }
 
 async function runSetup(options: SetupOptions): Promise<void> {
