@@ -17,18 +17,8 @@ export type KnownModelRef =
 
 export type ProviderModelCatalog = Record<LlmProviderName, Set<string>>;
 
-const GEMINI_MODEL_ALIASES: Record<string, string> = {
-  "gemini-3-pro": "gemini-3-pro-preview",
-  "gemini-3.1-pro": "gemini-3-pro-preview",
-  "gemini-3-flash": "gemini-3-flash-preview",
-  "gemini-3.1-flash": "gemini-3-flash-preview",
-  "gemini-2.6": "gemini-2.6-pro",
-};
-
-export function normalizeProviderModelId(provider: LlmProviderName, model: string): string {
-  const trimmed = model.trim();
-  if (provider !== "gemini") return trimmed;
-  return GEMINI_MODEL_ALIASES[trimmed] ?? trimmed;
+export function normalizeProviderModelId(_provider: LlmProviderName, model: string): string {
+  return model.trim();
 }
 
 export function defaultProviderModelCatalog(): ProviderModelCatalog {
