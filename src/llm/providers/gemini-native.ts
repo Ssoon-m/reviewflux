@@ -39,14 +39,14 @@ export class GeminiNativeClient {
           ? `${base}?key=${encodeURIComponent(this.options.apiKey)}`
           : base;
 
-      const authHeader =
-        this.options.authMode === "oauth"
-          ? { authorization: `Bearer ${await this.options.accessTokenProvider()}` }
-          : {};
+      const headers: Record<string, string> = { "content-type": "application/json" };
+      if (this.options.authMode === "oauth") {
+        headers.authorization = `Bearer ${await this.options.accessTokenProvider()}`;
+      }
 
       const res = await this.fetchImpl(endpoint, {
         method: "POST",
-        headers: { "content-type": "application/json", ...authHeader },
+        headers,
         body: JSON.stringify({ contents }),
         signal: ctrl.signal,
       });

@@ -4,7 +4,7 @@ import type { LlmProviderName } from "./types.js";
 
 export type ProviderModelCatalog = Record<LlmProviderName, Set<string>>;
 
-const OPENAI_MODELS = [
+export const OPENAI_MODELS = [
   "gpt-4o",
   "gpt-4o-mini",
   "gpt-4.1",
@@ -13,7 +13,7 @@ const OPENAI_MODELS = [
   "gpt-5.3-codex",
 ] as const;
 
-const GEMINI_MODELS = [
+export const GEMINI_MODELS = [
   "gemini-2.5-pro",
   "gemini-2.5-flash",
   "gemini-2.5-flash-lite",
@@ -24,6 +24,18 @@ const GEMINI_MODELS = [
   "gemini-3.1-pro-preview",
   "gemini-3.1-flash-preview",
 ] as const;
+
+export type OpenAIModelId = (typeof OPENAI_MODELS)[number];
+export type GeminiModelId = (typeof GEMINI_MODELS)[number];
+
+export type KnownModelIdByProvider = {
+  openai: OpenAIModelId;
+  gemini: GeminiModelId;
+};
+
+export type KnownModelRef =
+  | { provider: "openai"; model: OpenAIModelId }
+  | { provider: "gemini"; model: GeminiModelId };
 
 export function normalizeProviderModelId(provider: LlmProviderName, model: string): string {
   const trimmed = model.trim();
@@ -78,3 +90,14 @@ export function isModelSupported(params: {
 }): boolean {
   return params.catalog[params.provider]?.has(normalizeProviderModelId(params.provider, params.model)) ?? false;
 }
+
+export function isKnownModelId<P extends LlmProviderName>(
+  provider: P,
+  model: string,
+): model is KnownModelIdByProvider[P] {
+  if (provider === "openai") {
+    return (OPENAI_MODELS as readonly string[]).includes(model);
+  }
+  return (GEMINI_MODELS as readonly string[]).includes(model);
+}
+

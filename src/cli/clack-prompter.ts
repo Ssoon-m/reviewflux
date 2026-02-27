@@ -12,7 +12,7 @@ function guardCancel<T>(value: T | symbol): T {
     cancel("Setup cancelled.");
     throw new Error("setup_cancelled");
   }
-  return value;
+  return value as T;
 }
 
 export async function promptText(params: {
