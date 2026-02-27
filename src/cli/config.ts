@@ -13,12 +13,14 @@ export type OAuthConfig = {
   tokenUrl?: string;
   clientId?: string;
   redirectUri?: string;
+  oauthProviderId?: string;
   accessToken: string;
   refreshToken?: string;
   tokenType?: string;
   expiresAtEpochMs?: number;
   projectId?: string;
   accountId?: string;
+  providerData?: Record<string, unknown>;
 };
 
 export type ApiKeyConfig = {
