@@ -1,6 +1,6 @@
 import { createServer } from "node:http";
 import { spawn, spawnSync } from "node:child_process";
-import { input, password, select } from "@inquirer/prompts";
+import { promptPassword, promptSelect, promptText } from "../../cli/clack-prompter.js";
 import { getModels, loginOpenAICodex, type OAuthCredentials } from "@mariozechner/pi-ai";
 import {
   ensureReviewFluxHome,
@@ -73,26 +73,26 @@ async function pickDefaultModel(params: {
 }): Promise<string> {
   const available = getSelectableModels({ authMode: params.authMode, provider: params.provider });
   const fallback = available.find((m) => m.id === DEFAULT_MODEL)?.id ?? available[0]?.id ?? "gpt-5-codex";
-  return select<string>({
+  return promptSelect<string>({
     message: params.message,
-    choices: available.map((model) => ({
-      name: `${model.id} (${model.name})`,
+    options: available.map((model) => ({
+      label: `${model.id} (${model.name})`,
       value: model.id,
     })),
-    default: params.defaultModel ?? fallback,
+    initialValue: params.defaultModel ?? fallback,
   });
 }
 
 async function pickEffort(defaultEffort: EffortLevel = "medium"): Promise<EffortLevel> {
-  return select<EffortLevel>({
+  return promptSelect<EffortLevel>({
     message: "Select effort",
-    choices: [
-      { name: "Low", value: "low" },
-      { name: "Medium", value: "medium" },
-      { name: "High", value: "high" },
-      { name: "Extra high", value: "xhigh" },
+    options: [
+      { label: "Low", value: "low" },
+      { label: "Medium", value: "medium" },
+      { label: "High", value: "high" },
+      { label: "Extra high", value: "xhigh" },
     ],
-    default: defaultEffort,
+    initialValue: defaultEffort,
   });
 }
 
@@ -160,7 +160,7 @@ async function loginWithPiAiOpenAICodex(): Promise<OAuthCredentials> {
       }
 
       while (true) {
-        const value = await input({ message: prompt.message, default: prompt.placeholder ?? "" });
+        const value = await promptText({ message: prompt.message, initialValue: prompt.placeholder ?? "" });
         const trimmed = value.trim();
         if (trimmed.length > 0) return trimmed;
         if (prompt.allowEmpty) return "";
@@ -295,18 +295,18 @@ async function requestOAuthToken(params: {
 }
 
 async function collectOAuthConfig(options: SetupOptions): Promise<NonNullable<ReviewFluxConfig["oauth"]>> {
-  const oauthFlow = await select<"browser-flow" | "paste-token">({
+  const oauthFlow = await promptSelect<"browser-flow" | "paste-token">({
     message: "OAuth setup method",
-    choices: [
-      { name: "OpenAI Codex OAuth (browser login)", value: "browser-flow" },
-      { name: "Paste existing access token", value: "paste-token" },
+    options: [
+      { label: "OpenAI Codex OAuth (browser login)", value: "browser-flow" },
+      { label: "Paste existing access token", value: "paste-token" },
     ],
-    default: "browser-flow",
+    initialValue: "browser-flow",
   });
 
   if (oauthFlow === "paste-token") {
     const accessToken = assertNonEmpty(
-      await password({ message: "Paste OAuth access token", mask: "*" }),
+      await promptPassword({ message: "Paste OAuth access token", mask: "*" }),
       "oauth_access_token",
     );
 
@@ -333,12 +333,12 @@ async function collectOAuthConfig(options: SetupOptions): Promise<NonNullable<Re
   }
 
   const authorizeUrl = assertNonEmpty(
-    await input({ message: "OAuth authorize URL", default: CODEX_AUTHORIZE_URL }),
+    await promptText({ message: "OAuth authorize URL", initialValue: CODEX_AUTHORIZE_URL }),
     "oauth_authorize_url",
   );
-  const tokenUrl = assertNonEmpty(await input({ message: "OAuth token URL", default: CODEX_TOKEN_URL }), "oauth_token_url");
-  const clientId = assertNonEmpty(await input({ message: "OAuth client_id", default: CODEX_CLIENT_ID }), "oauth_client_id");
-  const redirectUri = assertNonEmpty(await input({ message: "Redirect URI", default: CODEX_REDIRECT_URI }), "oauth_redirect_uri");
+  const tokenUrl = assertNonEmpty(await promptText({ message: "OAuth token URL", initialValue: CODEX_TOKEN_URL }), "oauth_token_url");
+  const clientId = assertNonEmpty(await promptText({ message: "OAuth client_id", initialValue: CODEX_CLIENT_ID }), "oauth_client_id");
+  const redirectUri = assertNonEmpty(await promptText({ message: "Redirect URI", initialValue: CODEX_REDIRECT_URI }), "oauth_redirect_uri");
 
   const codeVerifier = createPkceVerifier();
   const state = createOAuthState();
@@ -354,13 +354,13 @@ async function collectOAuthConfig(options: SetupOptions): Promise<NonNullable<Re
   console.log("Open this URL in your LOCAL browser:");
   console.log(`${loginUrl}\n`);
 
-  const callbackMode = await select<"paste" | "local-server">({
+  const callbackMode = await promptSelect<"paste" | "local-server">({
     message: "How do you want to complete OAuth callback?",
-    choices: [
-      { name: "Paste redirect URL (or code / code#state)", value: "paste" },
-      { name: "Use local callback server", value: "local-server" },
+    options: [
+      { label: "Paste redirect URL (or code / code#state)", value: "paste" },
+      { label: "Use local callback server", value: "local-server" },
     ],
-    default: "paste",
+    initialValue: "paste",
   });
 
   let authResult: { code: string; state?: string };
@@ -376,7 +376,7 @@ async function collectOAuthConfig(options: SetupOptions): Promise<NonNullable<Re
     authResult = await waitForOAuthCode({ redirectUri, expectedState: state });
     console.log("[reviewflux] callback received.");
   } else {
-    const pasted = await input({ message: "Paste redirect URL (or code / code#state)" });
+    const pasted = await promptText({ message: "Paste redirect URL (or code / code#state)" });
     authResult = extractAuthCode(pasted);
     assertOAuthState({ expectedState: state, actualState: authResult.state, requireState: true });
   }
@@ -408,27 +408,27 @@ async function runSetup(options: SetupOptions): Promise<void> {
   console.log("[reviewflux] setup started");
   console.log(`[reviewflux] config directory: ${home}`);
 
-  const provider = await select<LlmProvider>({
+  const provider = await promptSelect<LlmProvider>({
     message: "Select LLM provider",
-    choices: [
-      { name: "codex (OpenAI)", value: "codex" },
-      { name: "gemini (Google)", value: "gemini" },
+    options: [
+      { label: "codex (OpenAI)", value: "codex" },
+      { label: "gemini (Google)", value: "gemini" },
     ],
-    default: "codex",
+    initialValue: "codex",
   });
 
   const authChoices =
     provider === "gemini"
-      ? [{ name: "API Key", value: "apikey" as const }]
+      ? [{ label: "API Key", value: "apikey" as const }]
       : [
-          { name: "OAuth (recommended)", value: "oauth" as const },
-          { name: "API Key", value: "apikey" as const },
+          { label: "OAuth (recommended)", value: "oauth" as const },
+          { label: "API Key", value: "apikey" as const },
         ];
 
-  const authMode = await select<"oauth" | "apikey">({
+  const authMode = await promptSelect<"oauth" | "apikey">({
     message: "Select auth mode",
-    choices: authChoices,
-    default: provider === "gemini" ? "apikey" : "oauth",
+    options: authChoices,
+    initialValue: provider === "gemini" ? "apikey" : "oauth",
   });
 
   const defaultBaseUrl = provider === "gemini" ? "https://generativelanguage.googleapis.com/v1beta" : "https://api.openai.com/v1";
@@ -436,7 +436,7 @@ async function runSetup(options: SetupOptions): Promise<void> {
 
   if (options.advanced) {
     llmApiBaseUrl = assertNonEmpty(
-      (await input({ message: "LLM API base URL", default: defaultBaseUrl })) || defaultBaseUrl,
+      (await promptText({ message: "LLM API base URL", initialValue: defaultBaseUrl })) || defaultBaseUrl,
       "llm_api_base_url",
     );
   }
@@ -444,7 +444,7 @@ async function runSetup(options: SetupOptions): Promise<void> {
   let config: ReviewFluxConfig;
 
   if (authMode === "apikey") {
-    const key = assertNonEmpty(await password({ message: "Paste API key", mask: "*" }), "api_key");
+    const key = assertNonEmpty(await promptPassword({ message: "Paste API key", mask: "*" }), "api_key");
     const model = await pickDefaultModel({
       message: "Select default model",
       authMode: "apikey",
