@@ -42,6 +42,8 @@ describe("provider normalizer", () => {
 describe("model selection", () => {
   it("normalizes gemini model aliases", () => {
     expect(normalizeProviderModelId("gemini", "gemini-3-pro")).toBe("gemini-3-pro-preview");
+    expect(normalizeProviderModelId("gemini", "gemini-3.1-pro")).toBe("gemini-3-pro-preview");
+    expect(normalizeProviderModelId("gemini", "gemini-3.1-flash")).toBe("gemini-3-flash-preview");
     expect(normalizeProviderModelId("gemini", "gemini-2.6")).toBe("gemini-2.6-pro");
   });
 

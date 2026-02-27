@@ -21,14 +21,16 @@ const GEMINI_MODELS = [
   "gemini-2.6-flash",
   "gemini-3-pro-preview",
   "gemini-3-flash-preview",
+  "gemini-3.1-pro-preview",
+  "gemini-3.1-flash-preview",
 ] as const;
 
 export function normalizeProviderModelId(provider: LlmProviderName, model: string): string {
   const trimmed = model.trim();
   if (provider !== "gemini") return trimmed;
 
-  if (trimmed === "gemini-3-pro") return "gemini-3-pro-preview";
-  if (trimmed === "gemini-3-flash") return "gemini-3-flash-preview";
+  if (trimmed === "gemini-3-pro" || trimmed === "gemini-3.1-pro") return "gemini-3-pro-preview";
+  if (trimmed === "gemini-3-flash" || trimmed === "gemini-3.1-flash") return "gemini-3-flash-preview";
   if (trimmed === "gemini-2.6") return "gemini-2.6-pro";
 
   return trimmed;
