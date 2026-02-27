@@ -1,8 +1,11 @@
 import { MODELS } from "@mariozechner/pi-ai/dist/models.generated.js";
 import type { LlmProviderName } from "./types.js";
 
-export type OpenAIModelId = (keyof (typeof MODELS)["openai"]) & string;
-export type GeminiModelId = (keyof (typeof MODELS)["google"]) & string;
+type ProviderModels<TKey extends string> =
+  TKey extends keyof typeof MODELS ? (typeof MODELS)[TKey] : Record<never, never>;
+
+export type OpenAIModelId = (keyof ProviderModels<"openai">) & string;
+export type GeminiModelId = (keyof ProviderModels<"google">) & string;
 
 export type KnownModelIdByProvider = {
   openai: OpenAIModelId;
@@ -19,10 +22,19 @@ export function normalizeProviderModelId(_provider: LlmProviderName, model: stri
   return model.trim();
 }
 
+function getProviderModelKeys(provider: string): string[] {
+  const table = MODELS as Record<string, Record<string, unknown>>;
+  const providerModels = table[provider];
+  if (!providerModels || typeof providerModels !== "object") {
+    return [];
+  }
+  return Object.keys(providerModels);
+}
+
 export function defaultProviderModelCatalog(): ProviderModelCatalog {
   return {
-    openai: new Set(Object.keys(MODELS.openai)),
-    gemini: new Set(Object.keys(MODELS.google).map((id) => normalizeProviderModelId("gemini", id))),
+    openai: new Set(getProviderModelKeys("openai")),
+    gemini: new Set(getProviderModelKeys("google").map((id) => normalizeProviderModelId("gemini", id))),
   };
 }
 
@@ -43,8 +55,8 @@ export function isKnownModelId<P extends LlmProviderName>(
   model: string,
 ): model is KnownModelIdByProvider[P] {
   if (provider === "openai") {
-    return model in MODELS.openai;
+    return getProviderModelKeys("openai").includes(model);
   }
   const normalized = normalizeProviderModelId("gemini", model);
-  return normalized in MODELS.google;
+  return getProviderModelKeys("google").includes(normalized);
 }
