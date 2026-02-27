@@ -429,13 +429,10 @@ async function runSetup(options: SetupOptions): Promise<void> {
     initialValue: "codex",
   });
 
-  const authChoices =
-    provider === "gemini"
-      ? [{ label: "API Key", value: "apikey" as const }]
-      : [
-          { label: "OAuth (recommended)", value: "oauth" as const },
-          { label: "API Key", value: "apikey" as const },
-        ];
+  const authChoices = [
+    { label: "OAuth", value: "oauth" as const },
+    { label: "API Key", value: "apikey" as const },
+  ];
 
   const authMode = await promptSelect<"oauth" | "apikey">({
     message: "Select auth mode",

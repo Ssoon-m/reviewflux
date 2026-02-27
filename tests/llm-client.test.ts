@@ -1,4 +1,19 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const { completeSimpleMock, getModelMock } = vi.hoisted(() => ({
+  completeSimpleMock: vi.fn(),
+  getModelMock: vi.fn(),
+}));
+
+vi.mock("@mariozechner/pi-ai", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@mariozechner/pi-ai")>();
+  return {
+    ...actual,
+    completeSimple: completeSimpleMock,
+    getModel: getModelMock,
+  };
+});
+
 import { OAuthTokenProvider } from "../src/auth/oauth-token-provider.js";
 import {
   GeminiLlmClient,
@@ -7,6 +22,11 @@ import {
   createLlmProvider,
   resolveModelRef,
 } from "../src/llm/client.js";
+
+beforeEach(() => {
+  completeSimpleMock.mockReset();
+  getModelMock.mockReset();
+});
 
 describe("OAuthLlmClient", () => {
   it("uses bearer token and returns content", async () => {
@@ -62,26 +82,29 @@ describe("OpenAIApiKeyLlmClient", () => {
 });
 
 describe("GeminiLlmClient", () => {
-  it("calls native generateContent endpoint with api key", async () => {
-    const llmFetch = vi.fn(async (url: string, init?: RequestInit) => {
-      expect(url).toContain("/models/gemini-2.5-flash:generateContent?key=gem-key");
-      const body = JSON.parse(String(init?.body)) as { contents: Array<{ role: string; parts: Array<{ text: string }> }> };
-      expect(body.contents[0].parts[0].text).toContain("[SYSTEM]");
-      return new Response(
-        JSON.stringify({ candidates: [{ content: { parts: [{ text: "gemini-ok" }] } }] }),
-        { status: 200 },
-      );
+  it("uses pi-ai completeSimple with api key", async () => {
+    getModelMock.mockReturnValueOnce({
+      id: "gemini-2.5-flash",
+      name: "Gemini",
+      api: "google-generative-ai",
+      provider: "google",
+      baseUrl: "https://generativelanguage.googleapis.com/v1beta",
+      reasoning: true,
+      input: ["text"],
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+      contextWindow: 1,
+      maxTokens: 1,
+    });
+    completeSimpleMock.mockResolvedValueOnce({
+      content: [{ type: "text", text: "gemini-ok" }],
     });
 
-    const client = new GeminiLlmClient(
-      {
-        authMode: "apikey",
-        baseUrl: "https://generativelanguage.googleapis.com/v1beta",
-        model: "gemini-2.5-flash",
-        apiKey: "gem-key",
-      },
-      llmFetch as unknown as typeof fetch,
-    );
+    const client = new GeminiLlmClient({
+      authMode: "apikey",
+      baseUrl: "https://generativelanguage.googleapis.com/v1beta",
+      model: "gemini-2.5-flash",
+      apiKey: "gem-key",
+    });
 
     await expect(
       client.generateReply([
@@ -89,6 +112,10 @@ describe("GeminiLlmClient", () => {
         { role: "user", content: "hi" },
       ]),
     ).resolves.toBe("gemini-ok");
+
+    expect(completeSimpleMock).toHaveBeenCalled();
+    const [, , options] = completeSimpleMock.mock.calls[0];
+    expect(options).toMatchObject({ apiKey: "gem-key" });
   });
 });
 
@@ -127,6 +154,22 @@ describe("createLlmProvider", () => {
   });
 
   it("creates gemini oauth provider implementation", async () => {
+    getModelMock.mockReturnValueOnce({
+      id: "gemini-2.5-pro",
+      name: "Gemini",
+      api: "google-generative-ai",
+      provider: "google",
+      baseUrl: "https://generativelanguage.googleapis.com/v1beta",
+      reasoning: true,
+      input: ["text"],
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+      contextWindow: 1,
+      maxTokens: 1,
+    });
+    completeSimpleMock.mockResolvedValueOnce({
+      content: [{ type: "text", text: "ok" }],
+    });
+
     const tokenProvider = new OAuthTokenProvider(
       {
         tokenUrl: "https://auth.example.com/token",
@@ -136,24 +179,19 @@ describe("createLlmProvider", () => {
       vi.fn(async () => new Response(JSON.stringify({ access_token: "gem-oauth", expires_in: 3600 }), { status: 200 })) as unknown as typeof fetch,
     );
 
-    const llmFetch = vi.fn(async (_url: string, init?: RequestInit) => {
-      expect(init?.headers).toMatchObject({ authorization: "Bearer gem-oauth" });
-      return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: "ok" }] } }] }), { status: 200 });
+    const provider = createLlmProvider({
+      authMode: "oauth",
+      provider: "gemini",
+      baseUrl: "https://generativelanguage.googleapis.com/v1beta",
+      model: "gemini-2.5-pro",
+      tokenProvider,
     });
-
-    const provider = createLlmProvider(
-      {
-        authMode: "oauth",
-        provider: "gemini",
-        baseUrl: "https://generativelanguage.googleapis.com/v1beta",
-        model: "gemini-2.5-pro",
-        tokenProvider,
-      },
-      llmFetch as unknown as typeof fetch,
-    );
 
     expect(provider).toBeInstanceOf(GeminiLlmClient);
     await expect(provider.generateReply([{ role: "user", content: "hi" }])).resolves.toBe("ok");
+
+    const [, , options] = completeSimpleMock.mock.calls.at(-1)!;
+    expect(options?.headers).toMatchObject({ authorization: "Bearer gem-oauth" });
   });
 });
 
