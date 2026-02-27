@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 import type { AppConfig } from "../src/config/env.js";
-import { resolveRequestedModelRef } from "../src/llm/model-policy.js";
+import {
+  buildModelAliasIndex,
+  modelKey,
+  parseModelAliasesJson,
+  parseModelRef,
+  resolveModelRefFromString,
+  resolveRequestedModelRef,
+} from "../src/llm/model-selection.js";
 import { normalizeProviderId } from "../src/llm/provider-normalizer.js";
 
 function makeConfig(patch: Partial<AppConfig>): AppConfig {
@@ -30,7 +37,24 @@ describe("provider normalizer", () => {
   });
 });
 
-describe("model policy", () => {
+describe("model selection", () => {
+  it("parses model refs", () => {
+    expect(parseModelRef("gemini/gemini-2.5-flash", "openai")).toEqual({
+      provider: "gemini",
+      model: "gemini-2.5-flash",
+    });
+    expect(parseModelRef("gpt-4o-mini", "openai")).toEqual({ provider: "openai", model: "gpt-4o-mini" });
+  });
+
+  it("resolves alias index", () => {
+    const aliases = parseModelAliasesJson('{"fast":{"provider":"gemini","model":"gemini-2.5-flash"}}');
+    const index = buildModelAliasIndex(aliases);
+    expect(resolveModelRefFromString({ raw: "fast", defaultProvider: "openai", aliasIndex: index })).toEqual({
+      provider: "gemini",
+      model: "gemini-2.5-flash",
+    });
+  });
+
   it("resolves alias and enforces allowlist", () => {
     const config = makeConfig({
       LLM_PROVIDER: "gemini",
@@ -39,7 +63,9 @@ describe("model policy", () => {
       LLM_ALLOWED_MODELS: "gemini/gemini-2.5-flash",
     });
 
-    expect(resolveRequestedModelRef(config)).toEqual({ provider: "gemini", model: "gemini-2.5-flash" });
+    const resolved = resolveRequestedModelRef(config);
+    expect(resolved).toEqual({ provider: "gemini", model: "gemini-2.5-flash" });
+    expect(modelKey(resolved)).toBe("gemini/gemini-2.5-flash");
   });
 
   it("throws when model is not allowed", () => {
