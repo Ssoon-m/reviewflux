@@ -5,7 +5,6 @@ import {
   ensureReviewFluxHome,
   saveConfig,
   type AuthMode,
-  type EffortLevel,
   type LlmProvider,
   type ReviewFluxConfig,
 } from "../../cli/config.js";
@@ -79,19 +78,6 @@ async function pickDefaultModel(params: {
     message: params.message,
     options: available.map((model) => ({ label: `${model.id} (${model.name})`, value: model.id })),
     initialValue: params.defaultModel ?? fallback,
-  });
-}
-
-async function pickEffort(defaultEffort: EffortLevel = "medium"): Promise<EffortLevel> {
-  return promptSelect<EffortLevel>({
-    message: "Select effort",
-    options: [
-      { label: "Low", value: "low" },
-      { label: "Medium", value: "medium" },
-      { label: "High", value: "high" },
-      { label: "Extra high", value: "xhigh" },
-    ],
-    initialValue: defaultEffort,
   });
 }
 
@@ -209,7 +195,6 @@ async function runSetup(options: SetupOptions): Promise<void> {
     );
   }
 
-  const effort = await pickEffort("medium");
   const profileId = `${provider}:default`;
 
   if (authMode === "apikey") {
@@ -228,7 +213,6 @@ async function runSetup(options: SetupOptions): Promise<void> {
       authMode,
       llmApiBaseUrl,
       model,
-      effort,
       apiKey: { key },
       auth: {
         profiles: {
@@ -265,7 +249,6 @@ async function runSetup(options: SetupOptions): Promise<void> {
     authMode,
     llmApiBaseUrl,
     model,
-    effort,
     oauth,
     auth: {
       profiles: {
