@@ -85,6 +85,16 @@ describe("model selection", () => {
     expect(() => resolveRequestedModelRef(config)).toThrow("model_not_allowed:openai/gpt-4o-mini");
   });
 
+  it("interprets unqualified allowlist entries with active provider", () => {
+    const config = makeConfig({
+      LLM_PROVIDER: "gemini",
+      LLM_MODEL: "gemini-2.5-flash",
+      LLM_ALLOWED_MODELS: "gemini-2.5-flash",
+    });
+
+    expect(resolveRequestedModelRef(config)).toEqual({ provider: "gemini", model: "gemini-2.5-flash" });
+  });
+
   it("accepts custom provider model catalog entries", () => {
     const config = makeConfig({
       LLM_PROVIDER: "gemini",

@@ -132,12 +132,35 @@ export async function runDaemonStartCommand(): Promise<void> {
   }
 
   try {
-    const modelProvider = cfg.authMode === "oauth" ? "openai-codex" : "openai";
+    const resolveProvider = (): string => {
+      if (selectedModel.includes("/")) {
+        const [rawProvider, ...rest] = selectedModel.split("/");
+        if (rest.length > 0) {
+          const normalized = rawProvider.trim().toLowerCase();
+          if (normalized === "google" || normalized === "gemini") return "google";
+          if (normalized === "openai-codex") return "openai-codex";
+          if (normalized === "openai") return "openai";
+        }
+      }
+
+      if (cfg.llm === "gemini") return "google";
+      if (cfg.llm === "codex" || cfg.authMode === "oauth") return "openai-codex";
+      return "openai";
+    };
+
+    const resolveModelId = (): string => {
+      if (!selectedModel.includes("/")) return selectedModel;
+      const [, ...rest] = selectedModel.split("/");
+      return rest.join("/") || selectedModel;
+    };
+
+    const modelProvider = resolveProvider();
+    const modelId = resolveModelId();
     const effort = cfg.effort ?? "medium";
-    console.log(`[reviewflux] testing model: ${selectedModel} (provider=${modelProvider}, effort=${effort})`);
-    const model = getModel(modelProvider, selectedModel as never);
+    console.log(`[reviewflux] testing model: ${modelId} (provider=${modelProvider}, effort=${effort})`);
+    const model = getModel(modelProvider as never, modelId as never);
     if (!model) {
-      throw new Error(`model_not_supported:${modelProvider}/${selectedModel}`);
+      throw new Error(`model_not_supported:${modelProvider}/${modelId}`);
     }
     const modelWithBaseUrl =
       modelProvider === "openai-codex"

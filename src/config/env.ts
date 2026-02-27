@@ -16,7 +16,7 @@ const schema = z
     OAUTH_AUDIENCE: z.string().optional(),
 
     LLM_API_BASE_URL: z.string().url(),
-    LLM_MODEL: z.string().min(1).default("gpt-4o-mini"),
+    LLM_MODEL: z.string().optional(),
     LLM_TIMEOUT_MS: z.coerce.number().default(30_000),
     PORT: z.coerce.number().default(3000),
   })
@@ -32,8 +32,11 @@ const schema = z
         ctx.addIssue({ code: "custom", path: ["OAUTH_CLIENT_SECRET"], message: "required_when_oauth" });
       }
     }
-
-  });
+  })
+  .transform((value) => ({
+    ...value,
+    LLM_MODEL: value.LLM_MODEL?.trim() || (value.LLM_PROVIDER === "gemini" ? "gemini-2.5-flash" : "gpt-4o-mini"),
+  }));
 
 export type AppConfig = z.infer<typeof schema>;
 

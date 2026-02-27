@@ -9,12 +9,13 @@ function resolveApiKey(config: AppConfig, provider: LlmProviderName): string {
   if (provider === "gemini") {
     const key = process.env.GEMINI_API_KEY?.trim();
     if (key) return key;
+    throw new Error("api_key_not_found_for_provider:gemini");
   }
 
   const key = process.env.OPENAI_API_KEY?.trim();
   if (key) return key;
 
-  throw new Error(`api_key_not_found_for_provider:${provider}`);
+  throw new Error("api_key_not_found_for_provider:openai");
 }
 
 export function resolveAuthInput(params: {

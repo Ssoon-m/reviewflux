@@ -1,3 +1,4 @@
+import { normalizeProviderId } from "./provider-normalizer.js";
 import type { LlmProviderName } from "./types.js";
 
 export type ModelRef = {
@@ -20,12 +21,12 @@ export function resolveModelRef(params: {
 
   const slash = trimmed.indexOf("/");
   if (slash > 0) {
-    const provider = trimmed.slice(0, slash) as LlmProviderName;
+    const providerRaw = trimmed.slice(0, slash);
     const model = trimmed.slice(slash + 1);
-    if ((provider === "openai" || provider === "gemini") && model) {
-      return { provider, model };
+    if (model) {
+      return { provider: normalizeProviderId(providerRaw), model };
     }
   }
 
-  return { provider: params.defaultProvider, model: trimmed };
+  return { provider: normalizeProviderId(params.defaultProvider), model: trimmed };
 }

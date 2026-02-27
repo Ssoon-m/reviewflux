@@ -8,6 +8,10 @@ export { parseModelAliasesJson };
 
 export function createLlmService(config: AppConfig): LlmProvider {
   const modelRef = resolveRequestedModelRef(config);
+  if (modelRef.provider !== config.LLM_PROVIDER) {
+    throw new Error(`provider_baseurl_mismatch:${config.LLM_PROVIDER}->${modelRef.provider}`);
+  }
+
   const authInput = resolveAuthInput({
     config,
     provider: modelRef.provider,

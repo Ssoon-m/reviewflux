@@ -62,7 +62,7 @@ export function resolveModelRefFromString(params: {
   return parseModelRef(trimmed, params.defaultProvider);
 }
 
-export function parseAllowedModelsCsv(raw?: string): Set<string> {
+export function parseAllowedModelsCsv(raw: string | undefined, defaultProvider: string): Set<string> {
   if (!raw?.trim()) return new Set();
 
   return new Set(
@@ -71,7 +71,7 @@ export function parseAllowedModelsCsv(raw?: string): Set<string> {
       .map((entry) => entry.trim())
       .filter(Boolean)
       .map((entry) => {
-        const parsed = parseModelRef(entry, "openai");
+        const parsed = parseModelRef(entry, defaultProvider);
         return parsed ? modelKey(parsed).toLowerCase() : entry.toLowerCase();
       }),
   );
@@ -96,7 +96,7 @@ export function resolveRequestedModelRef(config: AppConfig): ModelRef {
     throw new Error(`unsupported_model_for_provider:${resolved.provider}/${resolved.model}`);
   }
 
-  const allowlist = parseAllowedModelsCsv(config.LLM_ALLOWED_MODELS);
+  const allowlist = parseAllowedModelsCsv(config.LLM_ALLOWED_MODELS, config.LLM_PROVIDER);
   if (allowlist.size > 0) {
     const key = modelKey(resolved).toLowerCase();
     if (!allowlist.has(key)) {
