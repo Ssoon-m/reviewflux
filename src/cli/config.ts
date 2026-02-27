@@ -17,6 +17,7 @@ export type OAuthConfig = {
   refreshToken?: string;
   tokenType?: string;
   expiresAtEpochMs?: number;
+  projectId?: string;
 };
 
 export type ApiKeyConfig = {

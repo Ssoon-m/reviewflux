@@ -1,7 +1,7 @@
 import { createServer } from "node:http";
 import { spawn, spawnSync } from "node:child_process";
 import { promptPassword, promptSelect, promptText } from "../../cli/clack-prompter.js";
-import { getModel, getModels, loginOpenAICodex, type OAuthCredentials } from "@mariozechner/pi-ai";
+import { getModel, getModels, loginGeminiCli, loginOpenAICodex, type OAuthCredentials } from "@mariozechner/pi-ai";
 import {
   ensureReviewFluxHome,
   saveConfig,
@@ -48,8 +48,10 @@ function assertNonEmpty(value: string, field: string): string {
   return trimmed;
 }
 
-function resolvePiProviderForSetup(params: { authMode: AuthMode; provider: LlmProvider }): "openai" | "openai-codex" | "google" {
-  if (params.provider === "gemini") return "google";
+function resolvePiProviderForSetup(params: { authMode: AuthMode; provider: LlmProvider }): "openai" | "openai-codex" | "google" | "google-gemini-cli" {
+  if (params.provider === "gemini") {
+    return params.authMode === "oauth" ? "google-gemini-cli" : "google";
+  }
   return params.authMode === "oauth" ? "openai-codex" : "openai";
 }
 
@@ -63,7 +65,8 @@ function assertModelSupportedByPiAi(params: { authMode: AuthMode; provider: LlmP
 
 function getSelectableModels(params: { authMode: AuthMode; provider: LlmProvider }): Array<{ id: string; name: string }> {
   if (params.provider === "gemini") {
-    return getModels("google")
+    const provider = params.authMode === "oauth" ? "google-gemini-cli" : "google";
+    return getModels(provider)
       .filter((model) => model.id.startsWith("gemini-"))
       .map((model) => ({ id: model.id, name: model.name }));
   }
@@ -422,18 +425,35 @@ class CodexOAuthSetupStrategy implements OAuthSetupStrategy {
 
 class GeminiOAuthSetupStrategy implements OAuthSetupStrategy {
   async collectOAuthConfig(_options: SetupOptions): Promise<NonNullable<ReviewFluxConfig["oauth"]>> {
-    console.log("[reviewflux] Gemini OAuth uses bearer token input in setup.");
-    const accessToken = assertNonEmpty(
-      await promptPassword({ message: "Paste Google OAuth access token", mask: "*" }),
-      "oauth_access_token",
+    const creds = await loginGeminiCli(
+      async ({ url }) => {
+        console.log("\n[reviewflux] Gemini OAuth URL ready");
+        console.log("Open this URL in your LOCAL browser:");
+        console.log(`${url}\n`);
+
+        const opened = openBrowser(url);
+        if (opened) {
+          console.log("[reviewflux] opening browser for Gemini OAuth login...");
+        } else {
+          console.log("[reviewflux] browser auto-open failed. open the URL above manually.");
+        }
+      },
+      (message) => {
+        if (message?.trim()) console.log(`[reviewflux] ${message}`);
+      },
+      async () => {
+        return promptText({ message: "Paste redirect URL" });
+      },
     );
 
-    const refreshTokenRaw = await promptPassword({ message: "Refresh token (optional)", mask: "*" });
-    const refreshToken = refreshTokenRaw.trim() || undefined;
+    const oauthCreds = creds as unknown as { projectId?: unknown };
+    const projectId = typeof oauthCreds.projectId === "string" ? oauthCreds.projectId : undefined;
 
     return {
-      accessToken,
-      ...(refreshToken ? { refreshToken } : {}),
+      accessToken: creds.access,
+      refreshToken: creds.refresh,
+      expiresAtEpochMs: creds.expires,
+      ...(projectId ? { projectId } : {}),
     };
   }
 }

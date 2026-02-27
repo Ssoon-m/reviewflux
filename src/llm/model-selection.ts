@@ -78,8 +78,10 @@ export function parseAllowedModelsCsv(raw: string | undefined, defaultProvider: 
   );
 }
 
-function resolvePiProvider(params: { provider: string; authMode: string }): "openai" | "openai-codex" | "google" {
-  if (params.provider === "gemini") return "google";
+function resolvePiProvider(params: { provider: string; authMode: string }): "openai" | "openai-codex" | "google" | "google-gemini-cli" {
+  if (params.provider === "gemini") {
+    return params.authMode === "oauth" ? "google-gemini-cli" : "google";
+  }
   return params.authMode === "oauth" ? "openai-codex" : "openai";
 }
 

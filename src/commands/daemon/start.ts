@@ -1,6 +1,6 @@
 import { setTimeout as wait } from "node:timers/promises";
 import { Agent } from "@mariozechner/pi-agent-core";
-import { getModel } from "@mariozechner/pi-ai";
+import { getModel, refreshGoogleCloudToken } from "@mariozechner/pi-ai";
 import { getActiveAuthProfile, loadConfig, saveConfig, type ReviewFluxConfig } from "../../cli/config.js";
 
 type OAuthTokenResponse = {
@@ -119,21 +119,29 @@ export async function runDaemonStartCommand(): Promise<void> {
     activeAuth.oauth.accessToken &&
     activeAuth.oauth.expiresAtEpochMs &&
     activeAuth.oauth.refreshToken &&
-    activeAuth.oauth.tokenUrl &&
-    activeAuth.oauth.clientId &&
     Date.now() >= activeAuth.oauth.expiresAtEpochMs - 10_000
   ) {
     console.log("[reviewflux] access token expired soon. refreshing...");
-    const token = await refreshOAuthToken({
-      tokenUrl: activeAuth.oauth.tokenUrl,
-      clientId: activeAuth.oauth.clientId,
-      refreshToken: activeAuth.oauth.refreshToken,
-    });
 
-    activeAuth.oauth.accessToken = token.accessToken;
-    activeAuth.oauth.refreshToken = token.refreshToken ?? activeAuth.oauth.refreshToken;
-    activeAuth.oauth.tokenType = token.tokenType ?? activeAuth.oauth.tokenType;
-    activeAuth.oauth.expiresAtEpochMs = token.expiresInSec ? Date.now() + token.expiresInSec * 1000 : undefined;
+    if (cfg.llm === "gemini" && activeAuth.oauth.projectId) {
+      const refreshed = await refreshGoogleCloudToken(activeAuth.oauth.refreshToken, activeAuth.oauth.projectId);
+      activeAuth.oauth.accessToken = refreshed.access;
+      activeAuth.oauth.refreshToken = refreshed.refresh;
+      activeAuth.oauth.expiresAtEpochMs = refreshed.expires;
+      const refreshedMeta = refreshed as unknown as { projectId?: unknown };
+      activeAuth.oauth.projectId =
+        typeof refreshedMeta.projectId === "string" ? refreshedMeta.projectId : activeAuth.oauth.projectId;
+    } else if (activeAuth.oauth.tokenUrl && activeAuth.oauth.clientId) {
+      const token = await refreshOAuthToken({
+        tokenUrl: activeAuth.oauth.tokenUrl,
+        clientId: activeAuth.oauth.clientId,
+        refreshToken: activeAuth.oauth.refreshToken,
+      });
+      activeAuth.oauth.accessToken = token.accessToken;
+      activeAuth.oauth.refreshToken = token.refreshToken ?? activeAuth.oauth.refreshToken;
+      activeAuth.oauth.tokenType = token.tokenType ?? activeAuth.oauth.tokenType;
+      activeAuth.oauth.expiresAtEpochMs = token.expiresInSec ? Date.now() + token.expiresInSec * 1000 : undefined;
+    }
 
     // Keep legacy top-level fields in sync when they exist
     if (cfg.oauth) {
@@ -141,12 +149,18 @@ export async function runDaemonStartCommand(): Promise<void> {
       cfg.oauth.refreshToken = activeAuth.oauth.refreshToken;
       cfg.oauth.tokenType = activeAuth.oauth.tokenType;
       cfg.oauth.expiresAtEpochMs = activeAuth.oauth.expiresAtEpochMs;
+      cfg.oauth.projectId = activeAuth.oauth.projectId;
     }
 
     saveConfig(cfg);
   }
 
-  const apiKey = activeAuth.mode === "oauth" ? activeAuth.oauth.accessToken : activeAuth.apiKey.key.trim();
+  const apiKey =
+    activeAuth.mode === "oauth"
+      ? cfg.llm === "gemini" && activeAuth.oauth.projectId
+        ? JSON.stringify({ token: activeAuth.oauth.accessToken, projectId: activeAuth.oauth.projectId })
+        : activeAuth.oauth.accessToken
+      : activeAuth.apiKey.key.trim();
 
   console.log("[reviewflux] waiting 3 seconds before test request...");
   await wait(3000);
@@ -163,13 +177,15 @@ export async function runDaemonStartCommand(): Promise<void> {
         const [rawProvider, ...rest] = selectedModel.split("/");
         if (rest.length > 0) {
           const normalized = rawProvider.trim().toLowerCase();
-          if (normalized === "google" || normalized === "gemini") return "google";
+          if (normalized === "google" || normalized === "gemini") {
+            return cfg.llm === "gemini" && activeAuth.mode === "oauth" ? "google-gemini-cli" : "google";
+          }
           if (normalized === "openai-codex") return "openai-codex";
           if (normalized === "openai") return "openai";
         }
       }
 
-      if (cfg.llm === "gemini") return "google";
+      if (cfg.llm === "gemini") return activeAuth.mode === "oauth" ? "google-gemini-cli" : "google";
       if (cfg.llm === "codex" || activeAuth.mode === "oauth") return "openai-codex";
       return "openai";
     };
