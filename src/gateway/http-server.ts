@@ -4,8 +4,7 @@ import { fileURLToPath } from "node:url";
 import { realpathSync } from "node:fs";
 import { resolve } from "node:path";
 import { readConfig } from "../config/env.js";
-import { OAuthTokenProvider } from "../auth/oauth-token-provider.js";
-import { OAuthLlmClient } from "../llm/client.js";
+import { createLlmService } from "../llm/service.js";
 
 export function parsePromptText(input: unknown): string | null {
   if (typeof input !== "string") return null;
@@ -19,22 +18,7 @@ export function getClientErrorCode(_error: unknown): string {
 
 export function createApp() {
   const config = readConfig();
-
-  const tokenProvider = new OAuthTokenProvider({
-    tokenUrl: config.OAUTH_TOKEN_URL,
-    clientId: config.OAUTH_CLIENT_ID,
-    clientSecret: config.OAUTH_CLIENT_SECRET,
-    scope: config.OAUTH_SCOPE,
-    audience: config.OAUTH_AUDIENCE,
-    timeoutMs: config.LLM_TIMEOUT_MS
-  });
-
-  const llm = new OAuthLlmClient({
-    baseUrl: config.LLM_API_BASE_URL,
-    model: config.LLM_MODEL,
-    timeoutMs: config.LLM_TIMEOUT_MS,
-    tokenProvider
-  });
+  const llm = createLlmService(config);
 
   const app = express();
   app.use(express.json());

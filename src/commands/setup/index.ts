@@ -1,13 +1,14 @@
 import { createServer } from "node:http";
 import { spawn, spawnSync } from "node:child_process";
-import { input, password, select } from "@inquirer/prompts";
-import { getModels, loginOpenAICodex, type OAuthCredentials } from "@mariozechner/pi-ai";
+import { promptPassword, promptSelect, promptText } from "../../cli/clack-prompter.js";
+import { getModel, getModels, loginGeminiCli, loginOpenAICodex, type OAuthCredentials } from "@mariozechner/pi-ai";
 import {
   ensureReviewFluxHome,
   saveConfig,
   type AuthMode,
   type EffortLevel,
   type ReviewFluxConfig,
+  type LlmProvider,
 } from "../../cli/config.js";
 import {
   assertOAuthState,
@@ -47,8 +48,30 @@ function assertNonEmpty(value: string, field: string): string {
   return trimmed;
 }
 
-function getSelectableModels(authMode: AuthMode): Array<{ id: string; name: string }> {
-  if (authMode === "oauth") {
+function resolvePiProviderForSetup(params: { authMode: AuthMode; provider: LlmProvider }): "openai" | "openai-codex" | "google" | "google-gemini-cli" {
+  if (params.provider === "gemini") {
+    return params.authMode === "oauth" ? "google-gemini-cli" : "google";
+  }
+  return params.authMode === "oauth" ? "openai-codex" : "openai";
+}
+
+function assertModelSupportedByPiAi(params: { authMode: AuthMode; provider: LlmProvider; model: string }): void {
+  const piProvider = resolvePiProviderForSetup(params);
+  const resolved = getModel(piProvider, params.model as never);
+  if (!resolved) {
+    throw new Error(`model_not_supported_by_pi_ai:${piProvider}/${params.model}`);
+  }
+}
+
+function getSelectableModels(params: { authMode: AuthMode; provider: LlmProvider }): Array<{ id: string; name: string }> {
+  if (params.provider === "gemini") {
+    const provider = params.authMode === "oauth" ? "google-gemini-cli" : "google";
+    return getModels(provider)
+      .filter((model) => model.id.startsWith("gemini-"))
+      .map((model) => ({ id: model.id, name: model.name }));
+  }
+
+  if (params.authMode === "oauth") {
     return getModels("openai-codex").map((model) => ({ id: model.id, name: model.name }));
   }
 
@@ -60,30 +83,31 @@ function getSelectableModels(authMode: AuthMode): Array<{ id: string; name: stri
 async function pickDefaultModel(params: {
   message: string;
   authMode: AuthMode;
+  provider: LlmProvider;
   defaultModel?: string;
 }): Promise<string> {
-  const available = getSelectableModels(params.authMode);
+  const available = getSelectableModels({ authMode: params.authMode, provider: params.provider });
   const fallback = available.find((m) => m.id === DEFAULT_MODEL)?.id ?? available[0]?.id ?? "gpt-5-codex";
-  return select<string>({
+  return promptSelect<string>({
     message: params.message,
-    choices: available.map((model) => ({
-      name: `${model.id} (${model.name})`,
+    options: available.map((model) => ({
+      label: `${model.id} (${model.name})`,
       value: model.id,
     })),
-    default: params.defaultModel ?? fallback,
+    initialValue: params.defaultModel ?? fallback,
   });
 }
 
 async function pickEffort(defaultEffort: EffortLevel = "medium"): Promise<EffortLevel> {
-  return select<EffortLevel>({
+  return promptSelect<EffortLevel>({
     message: "Select effort",
-    choices: [
-      { name: "Low", value: "low" },
-      { name: "Medium", value: "medium" },
-      { name: "High", value: "high" },
-      { name: "Extra high", value: "xhigh" },
+    options: [
+      { label: "Low", value: "low" },
+      { label: "Medium", value: "medium" },
+      { label: "High", value: "high" },
+      { label: "Extra high", value: "xhigh" },
     ],
-    default: defaultEffort,
+    initialValue: defaultEffort,
   });
 }
 
@@ -151,7 +175,7 @@ async function loginWithPiAiOpenAICodex(): Promise<OAuthCredentials> {
       }
 
       while (true) {
-        const value = await input({ message: prompt.message, default: prompt.placeholder ?? "" });
+        const value = await promptText({ message: prompt.message, initialValue: prompt.placeholder ?? "" });
         const trimmed = value.trim();
         if (trimmed.length > 0) return trimmed;
         if (prompt.allowEmpty) return "";
@@ -285,112 +309,165 @@ async function requestOAuthToken(params: {
   };
 }
 
-async function collectOAuthConfig(options: SetupOptions): Promise<NonNullable<ReviewFluxConfig["oauth"]>> {
-  const oauthFlow = await select<"browser-flow" | "paste-token">({
-    message: "OAuth setup method",
-    choices: [
-      { name: "OpenAI Codex OAuth (browser login)", value: "browser-flow" },
-      { name: "Paste existing access token", value: "paste-token" },
-    ],
-    default: "browser-flow",
-  });
+type OAuthSetupStrategy = {
+  collectOAuthConfig(options: SetupOptions): Promise<NonNullable<ReviewFluxConfig["oauth"]>>;
+};
 
-  if (oauthFlow === "paste-token") {
-    const accessToken = assertNonEmpty(
-      await password({ message: "Paste OAuth access token", mask: "*" }),
-      "oauth_access_token",
+class CodexOAuthSetupStrategy implements OAuthSetupStrategy {
+  async collectOAuthConfig(options: SetupOptions): Promise<NonNullable<ReviewFluxConfig["oauth"]>> {
+    const oauthFlow = await promptSelect<"browser-flow" | "paste-token">({
+      message: "OAuth setup method",
+      options: [
+        { label: "OpenAI Codex OAuth (browser login)", value: "browser-flow" },
+        { label: "Paste existing access token", value: "paste-token" },
+      ],
+      initialValue: "browser-flow",
+    });
+
+    if (oauthFlow === "paste-token") {
+      const accessToken = assertNonEmpty(
+        await promptPassword({ message: "Paste OAuth access token", mask: "*" }),
+        "oauth_access_token",
+      );
+
+      return {
+        authorizeUrl: CODEX_AUTHORIZE_URL,
+        tokenUrl: CODEX_TOKEN_URL,
+        clientId: CODEX_CLIENT_ID,
+        redirectUri: CODEX_REDIRECT_URI,
+        accessToken,
+      };
+    }
+
+    if (!options.advanced) {
+      const creds = await loginWithPiAiOpenAICodex();
+      return {
+        authorizeUrl: CODEX_AUTHORIZE_URL,
+        tokenUrl: CODEX_TOKEN_URL,
+        clientId: CODEX_CLIENT_ID,
+        redirectUri: CODEX_REDIRECT_URI,
+        accessToken: creds.access,
+        refreshToken: creds.refresh,
+        expiresAtEpochMs: creds.expires,
+        accountId: typeof creds.accountId === "string" ? creds.accountId : undefined,
+      };
+    }
+
+    const authorizeUrl = assertNonEmpty(
+      await promptText({ message: "OAuth authorize URL", initialValue: CODEX_AUTHORIZE_URL }),
+      "oauth_authorize_url",
     );
+    const tokenUrl = assertNonEmpty(await promptText({ message: "OAuth token URL", initialValue: CODEX_TOKEN_URL }), "oauth_token_url");
+    const clientId = assertNonEmpty(await promptText({ message: "OAuth client_id", initialValue: CODEX_CLIENT_ID }), "oauth_client_id");
+    const redirectUri = assertNonEmpty(await promptText({ message: "Redirect URI", initialValue: CODEX_REDIRECT_URI }), "oauth_redirect_uri");
+
+    const codeVerifier = createPkceVerifier();
+    const state = createOAuthState();
+    const loginUrl = buildCodexAuthorizeUrl({
+      authorizeUrl,
+      clientId,
+      redirectUri,
+      state,
+      codeChallenge: createPkceChallenge(codeVerifier),
+    });
+
+    console.log("\n[reviewflux] OAuth URL ready");
+    console.log("Open this URL in your LOCAL browser:");
+    console.log(`${loginUrl}\n`);
+
+    const callbackMode = await promptSelect<"paste" | "local-server">({
+      message: "How do you want to complete OAuth callback?",
+      options: [
+        { label: "Paste redirect URL (or code / code#state)", value: "paste" },
+        { label: "Use local callback server", value: "local-server" },
+      ],
+      initialValue: "paste",
+    });
+
+    let authResult: { code: string; state?: string };
+
+    if (callbackMode === "local-server") {
+      console.log("[reviewflux] opening browser for OAuth login...");
+      const opened = openBrowser(loginUrl);
+      if (!opened) {
+        console.log("[reviewflux] browser auto-open failed. open the URL above manually.");
+      }
+
+      console.log("[reviewflux] waiting for OAuth callback...");
+      authResult = await waitForOAuthCode({ redirectUri, expectedState: state });
+      console.log("[reviewflux] callback received.");
+    } else {
+      const pasted = await promptText({ message: "Paste redirect URL (or code / code#state)" });
+      authResult = extractAuthCode(pasted);
+      assertOAuthState({ expectedState: state, actualState: authResult.state, requireState: true });
+    }
+
+    console.log("[reviewflux] requesting access token...");
+    const token = await requestOAuthToken({
+      tokenUrl,
+      clientId,
+      code: authResult.code,
+      redirectUri,
+      codeVerifier,
+    });
 
     return {
-      authorizeUrl: CODEX_AUTHORIZE_URL,
-      tokenUrl: CODEX_TOKEN_URL,
-      clientId: CODEX_CLIENT_ID,
-      redirectUri: CODEX_REDIRECT_URI,
-      accessToken,
+      authorizeUrl,
+      tokenUrl,
+      clientId,
+      redirectUri,
+      accessToken: token.accessToken,
+      refreshToken: token.refreshToken,
+      tokenType: token.tokenType,
+      expiresAtEpochMs: token.expiresInSec ? Date.now() + token.expiresInSec * 1000 : undefined,
     };
   }
+}
 
-  if (!options.advanced) {
-    const creds = await loginWithPiAiOpenAICodex();
+class GeminiOAuthSetupStrategy implements OAuthSetupStrategy {
+  async collectOAuthConfig(_options: SetupOptions): Promise<NonNullable<ReviewFluxConfig["oauth"]>> {
+    const creds = await loginGeminiCli(
+      async ({ url }) => {
+        console.log("\n[reviewflux] Gemini OAuth URL ready");
+        console.log("Open this URL in your LOCAL browser:");
+        console.log(`${url}\n`);
+
+        const opened = openBrowser(url);
+        if (opened) {
+          console.log("[reviewflux] opening browser for Gemini OAuth login...");
+        } else {
+          console.log("[reviewflux] browser auto-open failed. open the URL above manually.");
+        }
+      },
+      (message) => {
+        if (message?.trim()) console.log(`[reviewflux] ${message}`);
+      },
+      async () => {
+        return promptText({ message: "Paste redirect URL" });
+      },
+    );
+
+    const oauthCreds = creds as unknown as { projectId?: unknown };
+    const projectId = typeof oauthCreds.projectId === "string" ? oauthCreds.projectId : undefined;
+
     return {
-      authorizeUrl: CODEX_AUTHORIZE_URL,
-      tokenUrl: CODEX_TOKEN_URL,
-      clientId: CODEX_CLIENT_ID,
-      redirectUri: CODEX_REDIRECT_URI,
       accessToken: creds.access,
       refreshToken: creds.refresh,
       expiresAtEpochMs: creds.expires,
+      ...(projectId ? { projectId } : {}),
     };
   }
+}
 
-  const authorizeUrl = assertNonEmpty(
-    await input({ message: "OAuth authorize URL", default: CODEX_AUTHORIZE_URL }),
-    "oauth_authorize_url",
-  );
-  const tokenUrl = assertNonEmpty(await input({ message: "OAuth token URL", default: CODEX_TOKEN_URL }), "oauth_token_url");
-  const clientId = assertNonEmpty(await input({ message: "OAuth client_id", default: CODEX_CLIENT_ID }), "oauth_client_id");
-  const redirectUri = assertNonEmpty(await input({ message: "Redirect URI", default: CODEX_REDIRECT_URI }), "oauth_redirect_uri");
-
-  const codeVerifier = createPkceVerifier();
-  const state = createOAuthState();
-  const loginUrl = buildCodexAuthorizeUrl({
-    authorizeUrl,
-    clientId,
-    redirectUri,
-    state,
-    codeChallenge: createPkceChallenge(codeVerifier),
-  });
-
-  console.log("\n[reviewflux] OAuth URL ready");
-  console.log("Open this URL in your LOCAL browser:");
-  console.log(`${loginUrl}\n`);
-
-  const callbackMode = await select<"paste" | "local-server">({
-    message: "How do you want to complete OAuth callback?",
-    choices: [
-      { name: "Paste redirect URL (or code / code#state)", value: "paste" },
-      { name: "Use local callback server", value: "local-server" },
-    ],
-    default: "paste",
-  });
-
-  let authResult: { code: string; state?: string };
-
-  if (callbackMode === "local-server") {
-    console.log("[reviewflux] opening browser for OAuth login...");
-    const opened = openBrowser(loginUrl);
-    if (!opened) {
-      console.log("[reviewflux] browser auto-open failed. open the URL above manually.");
-    }
-
-    console.log("[reviewflux] waiting for OAuth callback...");
-    authResult = await waitForOAuthCode({ redirectUri, expectedState: state });
-    console.log("[reviewflux] callback received.");
-  } else {
-    const pasted = await input({ message: "Paste redirect URL (or code / code#state)" });
-    authResult = extractAuthCode(pasted);
-    assertOAuthState({ expectedState: state, actualState: authResult.state, requireState: true });
+function createOAuthSetupStrategy(provider: LlmProvider): OAuthSetupStrategy {
+  if (provider === "gemini") {
+    return new GeminiOAuthSetupStrategy();
   }
+  return new CodexOAuthSetupStrategy();
+}
 
-  console.log("[reviewflux] requesting access token...");
-  const token = await requestOAuthToken({
-    tokenUrl,
-    clientId,
-    code: authResult.code,
-    redirectUri,
-    codeVerifier,
-  });
-
-  return {
-    authorizeUrl,
-    tokenUrl,
-    clientId,
-    redirectUri,
-    accessToken: token.accessToken,
-    refreshToken: token.refreshToken,
-    tokenType: token.tokenType,
-    expiresAtEpochMs: token.expiresInSec ? Date.now() + token.expiresInSec * 1000 : undefined,
-  };
+async function collectOAuthConfig(provider: LlmProvider, options: SetupOptions): Promise<NonNullable<ReviewFluxConfig["oauth"]>> {
+  return createOAuthSetupStrategy(provider).collectOAuthConfig(options);
 }
 
 async function runSetup(options: SetupOptions): Promise<void> {
@@ -399,27 +476,32 @@ async function runSetup(options: SetupOptions): Promise<void> {
   console.log("[reviewflux] setup started");
   console.log(`[reviewflux] config directory: ${home}`);
 
-  const provider = await select<"codex">({
+  const provider = await promptSelect<LlmProvider>({
     message: "Select LLM provider",
-    choices: [{ name: "codex (only option for now)", value: "codex" }],
-    default: "codex",
-  });
-
-  const authMode = await select<"oauth" | "apikey">({
-    message: "Select auth mode",
-    choices: [
-      { name: "OAuth (recommended)", value: "oauth" },
-      { name: "API Key", value: "apikey" },
+    options: [
+      { label: "codex (OpenAI)", value: "codex" },
+      { label: "gemini (Google)", value: "gemini" },
     ],
-    default: "oauth",
+    initialValue: "codex",
   });
 
-  let llmApiBaseUrl = "https://api.openai.com/v1";
+  const authChoices = [
+    { label: "OAuth", value: "oauth" as const },
+    { label: "API Key", value: "apikey" as const },
+  ];
+
+  const authMode = await promptSelect<"oauth" | "apikey">({
+    message: "Select auth mode",
+    options: authChoices,
+    initialValue: provider === "gemini" ? "apikey" : "oauth",
+  });
+
+  const defaultBaseUrl = provider === "gemini" ? "https://generativelanguage.googleapis.com/v1beta" : "https://api.openai.com/v1";
+  let llmApiBaseUrl = defaultBaseUrl;
 
   if (options.advanced) {
     llmApiBaseUrl = assertNonEmpty(
-      (await input({ message: "LLM API base URL", default: "https://api.openai.com/v1" })) ||
-        "https://api.openai.com/v1",
+      (await promptText({ message: "LLM API base URL", initialValue: defaultBaseUrl })) || defaultBaseUrl,
       "llm_api_base_url",
     );
   }
@@ -427,14 +509,17 @@ async function runSetup(options: SetupOptions): Promise<void> {
   let config: ReviewFluxConfig;
 
   if (authMode === "apikey") {
-    const key = assertNonEmpty(await password({ message: "Paste API key", mask: "*" }), "api_key");
+    const key = assertNonEmpty(await promptPassword({ message: "Paste API key", mask: "*" }), "api_key");
     const model = await pickDefaultModel({
       message: "Select default model",
       authMode: "apikey",
-      defaultModel: "gpt-5-codex",
+      provider,
+      defaultModel: provider === "gemini" ? "gemini-2.5-flash" : "gpt-5-codex",
     });
+    assertModelSupportedByPiAi({ authMode: "apikey", provider, model });
     const effort = await pickEffort("medium");
 
+    const profileId = `${provider}:default`;
     config = {
       appName: "reviewflux",
       llm: provider,
@@ -443,16 +528,31 @@ async function runSetup(options: SetupOptions): Promise<void> {
       model,
       effort,
       apiKey: { key },
+      auth: {
+        profiles: {
+          [profileId]: {
+            provider,
+            mode: "apikey",
+            apiKey: { key },
+          },
+        },
+        order: {
+          [provider]: [profileId],
+        },
+      },
     };
   } else {
-    const oauth = await collectOAuthConfig(options);
+    const oauth = await collectOAuthConfig(provider, options);
     const model = await pickDefaultModel({
       message: "Select default model (OAuth verified)",
       authMode: "oauth",
+      provider,
       defaultModel: "gpt-5.3-codex",
     });
+    assertModelSupportedByPiAi({ authMode: "oauth", provider, model });
     const effort = await pickEffort("medium");
 
+    const profileId = `${provider}:default`;
     config = {
       appName: "reviewflux",
       llm: provider,
@@ -461,6 +561,18 @@ async function runSetup(options: SetupOptions): Promise<void> {
       model,
       effort,
       oauth,
+      auth: {
+        profiles: {
+          [profileId]: {
+            provider,
+            mode: "oauth",
+            oauth,
+          },
+        },
+        order: {
+          [provider]: [profileId],
+        },
+      },
     };
   }
 
