@@ -6,6 +6,7 @@ const schema = z
     LLM_AUTH_MODE: z.enum(["oauth", "apikey"]).default("oauth"),
     LLM_API_KEY: z.string().optional(),
     LLM_MODEL_ALIASES_JSON: z.string().optional(),
+    LLM_PROVIDER_MODELS_JSON: z.string().optional(),
     LLM_ALLOWED_MODELS: z.string().optional(),
 
     OAUTH_TOKEN_URL: z.string().url().optional(),

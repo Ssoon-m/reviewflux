@@ -1,5 +1,6 @@
 import type { AppConfig } from "../config/env.js";
 import type { ModelRef } from "./model-ref.js";
+import { isModelSupported, normalizeProviderModelId, resolveProviderModelCatalog } from "./models-config.providers.js";
 import { normalizeProviderId } from "./provider-normalizer.js";
 
 export type ModelAliasIndex = {
@@ -16,14 +17,16 @@ export function parseModelRef(raw: string, defaultProvider: string): ModelRef | 
 
   const slash = trimmed.indexOf("/");
   if (slash < 0) {
-    return { provider: normalizeProviderId(defaultProvider), model: trimmed };
+    const provider = normalizeProviderId(defaultProvider);
+    return { provider, model: normalizeProviderModelId(provider, trimmed) };
   }
 
   const providerRaw = trimmed.slice(0, slash).trim();
   const model = trimmed.slice(slash + 1).trim();
   if (!providerRaw || !model) return null;
 
-  return { provider: normalizeProviderId(providerRaw), model };
+  const provider = normalizeProviderId(providerRaw);
+  return { provider, model: normalizeProviderModelId(provider, model) };
 }
 
 export function parseModelAliasesJson(raw?: string): Record<string, ModelRef> {
@@ -86,6 +89,11 @@ export function resolveRequestedModelRef(config: AppConfig): ModelRef {
 
   if (!resolved) {
     throw new Error(`invalid_model_reference:${config.LLM_MODEL}`);
+  }
+
+  const catalog = resolveProviderModelCatalog(config);
+  if (!isModelSupported({ catalog, provider: resolved.provider, model: resolved.model })) {
+    throw new Error(`unsupported_model_for_provider:${resolved.provider}/${resolved.model}`);
   }
 
   const allowlist = parseAllowedModelsCsv(config.LLM_ALLOWED_MODELS);

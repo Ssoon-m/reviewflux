@@ -9,6 +9,7 @@ import {
   resolveRequestedModelRef,
 } from "../src/llm/model-selection.js";
 import { normalizeProviderId } from "../src/llm/provider-normalizer.js";
+import { normalizeProviderModelId } from "../src/llm/models-config.providers.js";
 
 function makeConfig(patch: Partial<AppConfig>): AppConfig {
   return {
@@ -16,6 +17,7 @@ function makeConfig(patch: Partial<AppConfig>): AppConfig {
     LLM_AUTH_MODE: "apikey",
     LLM_API_KEY: "test-key",
     LLM_MODEL_ALIASES_JSON: undefined,
+    LLM_PROVIDER_MODELS_JSON: undefined,
     LLM_ALLOWED_MODELS: undefined,
     OAUTH_TOKEN_URL: undefined,
     OAUTH_CLIENT_ID: undefined,
@@ -38,6 +40,11 @@ describe("provider normalizer", () => {
 });
 
 describe("model selection", () => {
+  it("normalizes gemini model aliases", () => {
+    expect(normalizeProviderModelId("gemini", "gemini-3-pro")).toBe("gemini-3-pro-preview");
+    expect(normalizeProviderModelId("gemini", "gemini-2.6")).toBe("gemini-2.6-pro");
+  });
+
   it("parses model refs", () => {
     expect(parseModelRef("gemini/gemini-2.5-flash", "openai")).toEqual({
       provider: "gemini",
@@ -76,5 +83,15 @@ describe("model selection", () => {
     });
 
     expect(() => resolveRequestedModelRef(config)).toThrow("model_not_allowed:openai/gpt-4o-mini");
+  });
+
+  it("accepts custom provider model catalog entries", () => {
+    const config = makeConfig({
+      LLM_PROVIDER: "gemini",
+      LLM_MODEL: "gemini/gemini-2.6-ultra",
+      LLM_PROVIDER_MODELS_JSON: '{"gemini":["gemini-2.6-ultra"]}',
+    });
+
+    expect(resolveRequestedModelRef(config)).toEqual({ provider: "gemini", model: "gemini-2.6-ultra" });
   });
 });
