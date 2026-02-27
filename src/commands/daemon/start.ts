@@ -1,6 +1,6 @@
 import { setTimeout as wait } from "node:timers/promises";
 import { Agent } from "@mariozechner/pi-agent-core";
-import { getModel, refreshGoogleCloudToken } from "@mariozechner/pi-ai";
+import { getModel, refreshGoogleCloudToken, refreshOpenAICodexToken } from "@mariozechner/pi-ai";
 import { getActiveAuthProfile, loadConfig, saveConfig, type ReviewFluxConfig } from "../../cli/config.js";
 
 type OAuthTokenResponse = {
@@ -131,6 +131,13 @@ export async function runDaemonStartCommand(): Promise<void> {
       const refreshedMeta = refreshed as unknown as { projectId?: unknown };
       activeAuth.oauth.projectId =
         typeof refreshedMeta.projectId === "string" ? refreshedMeta.projectId : activeAuth.oauth.projectId;
+    } else if (cfg.llm === "codex") {
+      const refreshed = await refreshOpenAICodexToken(activeAuth.oauth.refreshToken);
+      activeAuth.oauth.accessToken = refreshed.access;
+      activeAuth.oauth.refreshToken = refreshed.refresh;
+      activeAuth.oauth.expiresAtEpochMs = refreshed.expires;
+      activeAuth.oauth.accountId =
+        typeof refreshed.accountId === "string" ? refreshed.accountId : activeAuth.oauth.accountId;
     } else if (activeAuth.oauth.tokenUrl && activeAuth.oauth.clientId) {
       const token = await refreshOAuthToken({
         tokenUrl: activeAuth.oauth.tokenUrl,
@@ -150,6 +157,7 @@ export async function runDaemonStartCommand(): Promise<void> {
       cfg.oauth.tokenType = activeAuth.oauth.tokenType;
       cfg.oauth.expiresAtEpochMs = activeAuth.oauth.expiresAtEpochMs;
       cfg.oauth.projectId = activeAuth.oauth.projectId;
+      cfg.oauth.accountId = activeAuth.oauth.accountId;
     }
 
     saveConfig(cfg);

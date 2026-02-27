@@ -349,6 +349,7 @@ class CodexOAuthSetupStrategy implements OAuthSetupStrategy {
         accessToken: creds.access,
         refreshToken: creds.refresh,
         expiresAtEpochMs: creds.expires,
+        accountId: typeof creds.accountId === "string" ? creds.accountId : undefined,
       };
     }
 
