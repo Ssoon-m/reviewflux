@@ -84,22 +84,25 @@ async function pickDefaultModel(params: {
 function openBrowser(url: string): boolean {
   const platform = process.platform;
 
+  const spawnDetached = (command: string, args: string[]) => {
+    const proc = spawn(command, args, { stdio: "ignore", detached: true });
+    proc.unref();
+    return proc.pid != null;
+  };
+
   if (platform === "darwin") {
     const probe = spawnSync("which", ["open"], { encoding: "utf8" });
     if (probe.status !== 0) return false;
-    const proc = spawn("open", [url], { stdio: "ignore" });
-    return proc.pid != null;
+    return spawnDetached("open", [url]);
   }
 
   if (platform === "win32") {
-    const proc = spawn("cmd", ["/c", "start", "", url], { stdio: "ignore" });
-    return proc.pid != null;
+    return spawnDetached("cmd", ["/c", "start", "", url]);
   }
 
   const probe = spawnSync("which", ["xdg-open"], { encoding: "utf8" });
   if (probe.status !== 0) return false;
-  const proc = spawn("xdg-open", [url], { stdio: "ignore" });
-  return proc.pid != null;
+  return spawnDetached("xdg-open", [url]);
 }
 
 async function collectOAuthConfig(provider: LlmProvider): Promise<NonNullable<ReviewFluxConfig["oauth"]>> {
