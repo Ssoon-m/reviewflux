@@ -306,112 +306,147 @@ async function requestOAuthToken(params: {
   };
 }
 
-async function collectOAuthConfig(options: SetupOptions): Promise<NonNullable<ReviewFluxConfig["oauth"]>> {
-  const oauthFlow = await promptSelect<"browser-flow" | "paste-token">({
-    message: "OAuth setup method",
-    options: [
-      { label: "OpenAI Codex OAuth (browser login)", value: "browser-flow" },
-      { label: "Paste existing access token", value: "paste-token" },
-    ],
-    initialValue: "browser-flow",
-  });
+type OAuthSetupStrategy = {
+  collectOAuthConfig(options: SetupOptions): Promise<NonNullable<ReviewFluxConfig["oauth"]>>;
+};
 
-  if (oauthFlow === "paste-token") {
+class CodexOAuthSetupStrategy implements OAuthSetupStrategy {
+  async collectOAuthConfig(options: SetupOptions): Promise<NonNullable<ReviewFluxConfig["oauth"]>> {
+    const oauthFlow = await promptSelect<"browser-flow" | "paste-token">({
+      message: "OAuth setup method",
+      options: [
+        { label: "OpenAI Codex OAuth (browser login)", value: "browser-flow" },
+        { label: "Paste existing access token", value: "paste-token" },
+      ],
+      initialValue: "browser-flow",
+    });
+
+    if (oauthFlow === "paste-token") {
+      const accessToken = assertNonEmpty(
+        await promptPassword({ message: "Paste OAuth access token", mask: "*" }),
+        "oauth_access_token",
+      );
+
+      return {
+        authorizeUrl: CODEX_AUTHORIZE_URL,
+        tokenUrl: CODEX_TOKEN_URL,
+        clientId: CODEX_CLIENT_ID,
+        redirectUri: CODEX_REDIRECT_URI,
+        accessToken,
+      };
+    }
+
+    if (!options.advanced) {
+      const creds = await loginWithPiAiOpenAICodex();
+      return {
+        authorizeUrl: CODEX_AUTHORIZE_URL,
+        tokenUrl: CODEX_TOKEN_URL,
+        clientId: CODEX_CLIENT_ID,
+        redirectUri: CODEX_REDIRECT_URI,
+        accessToken: creds.access,
+        refreshToken: creds.refresh,
+        expiresAtEpochMs: creds.expires,
+      };
+    }
+
+    const authorizeUrl = assertNonEmpty(
+      await promptText({ message: "OAuth authorize URL", initialValue: CODEX_AUTHORIZE_URL }),
+      "oauth_authorize_url",
+    );
+    const tokenUrl = assertNonEmpty(await promptText({ message: "OAuth token URL", initialValue: CODEX_TOKEN_URL }), "oauth_token_url");
+    const clientId = assertNonEmpty(await promptText({ message: "OAuth client_id", initialValue: CODEX_CLIENT_ID }), "oauth_client_id");
+    const redirectUri = assertNonEmpty(await promptText({ message: "Redirect URI", initialValue: CODEX_REDIRECT_URI }), "oauth_redirect_uri");
+
+    const codeVerifier = createPkceVerifier();
+    const state = createOAuthState();
+    const loginUrl = buildCodexAuthorizeUrl({
+      authorizeUrl,
+      clientId,
+      redirectUri,
+      state,
+      codeChallenge: createPkceChallenge(codeVerifier),
+    });
+
+    console.log("\n[reviewflux] OAuth URL ready");
+    console.log("Open this URL in your LOCAL browser:");
+    console.log(`${loginUrl}\n`);
+
+    const callbackMode = await promptSelect<"paste" | "local-server">({
+      message: "How do you want to complete OAuth callback?",
+      options: [
+        { label: "Paste redirect URL (or code / code#state)", value: "paste" },
+        { label: "Use local callback server", value: "local-server" },
+      ],
+      initialValue: "paste",
+    });
+
+    let authResult: { code: string; state?: string };
+
+    if (callbackMode === "local-server") {
+      console.log("[reviewflux] opening browser for OAuth login...");
+      const opened = openBrowser(loginUrl);
+      if (!opened) {
+        console.log("[reviewflux] browser auto-open failed. open the URL above manually.");
+      }
+
+      console.log("[reviewflux] waiting for OAuth callback...");
+      authResult = await waitForOAuthCode({ redirectUri, expectedState: state });
+      console.log("[reviewflux] callback received.");
+    } else {
+      const pasted = await promptText({ message: "Paste redirect URL (or code / code#state)" });
+      authResult = extractAuthCode(pasted);
+      assertOAuthState({ expectedState: state, actualState: authResult.state, requireState: true });
+    }
+
+    console.log("[reviewflux] requesting access token...");
+    const token = await requestOAuthToken({
+      tokenUrl,
+      clientId,
+      code: authResult.code,
+      redirectUri,
+      codeVerifier,
+    });
+
+    return {
+      authorizeUrl,
+      tokenUrl,
+      clientId,
+      redirectUri,
+      accessToken: token.accessToken,
+      refreshToken: token.refreshToken,
+      tokenType: token.tokenType,
+      expiresAtEpochMs: token.expiresInSec ? Date.now() + token.expiresInSec * 1000 : undefined,
+    };
+  }
+}
+
+class GeminiOAuthSetupStrategy implements OAuthSetupStrategy {
+  async collectOAuthConfig(_options: SetupOptions): Promise<NonNullable<ReviewFluxConfig["oauth"]>> {
+    console.log("[reviewflux] Gemini OAuth uses bearer token input in setup.");
     const accessToken = assertNonEmpty(
-      await promptPassword({ message: "Paste OAuth access token", mask: "*" }),
+      await promptPassword({ message: "Paste Google OAuth access token", mask: "*" }),
       "oauth_access_token",
     );
 
+    const refreshTokenRaw = await promptPassword({ message: "Refresh token (optional)", mask: "*" });
+    const refreshToken = refreshTokenRaw.trim() || undefined;
+
     return {
-      authorizeUrl: CODEX_AUTHORIZE_URL,
-      tokenUrl: CODEX_TOKEN_URL,
-      clientId: CODEX_CLIENT_ID,
-      redirectUri: CODEX_REDIRECT_URI,
       accessToken,
+      ...(refreshToken ? { refreshToken } : {}),
     };
   }
+}
 
-  if (!options.advanced) {
-    const creds = await loginWithPiAiOpenAICodex();
-    return {
-      authorizeUrl: CODEX_AUTHORIZE_URL,
-      tokenUrl: CODEX_TOKEN_URL,
-      clientId: CODEX_CLIENT_ID,
-      redirectUri: CODEX_REDIRECT_URI,
-      accessToken: creds.access,
-      refreshToken: creds.refresh,
-      expiresAtEpochMs: creds.expires,
-    };
+function createOAuthSetupStrategy(provider: LlmProvider): OAuthSetupStrategy {
+  if (provider === "gemini") {
+    return new GeminiOAuthSetupStrategy();
   }
+  return new CodexOAuthSetupStrategy();
+}
 
-  const authorizeUrl = assertNonEmpty(
-    await promptText({ message: "OAuth authorize URL", initialValue: CODEX_AUTHORIZE_URL }),
-    "oauth_authorize_url",
-  );
-  const tokenUrl = assertNonEmpty(await promptText({ message: "OAuth token URL", initialValue: CODEX_TOKEN_URL }), "oauth_token_url");
-  const clientId = assertNonEmpty(await promptText({ message: "OAuth client_id", initialValue: CODEX_CLIENT_ID }), "oauth_client_id");
-  const redirectUri = assertNonEmpty(await promptText({ message: "Redirect URI", initialValue: CODEX_REDIRECT_URI }), "oauth_redirect_uri");
-
-  const codeVerifier = createPkceVerifier();
-  const state = createOAuthState();
-  const loginUrl = buildCodexAuthorizeUrl({
-    authorizeUrl,
-    clientId,
-    redirectUri,
-    state,
-    codeChallenge: createPkceChallenge(codeVerifier),
-  });
-
-  console.log("\n[reviewflux] OAuth URL ready");
-  console.log("Open this URL in your LOCAL browser:");
-  console.log(`${loginUrl}\n`);
-
-  const callbackMode = await promptSelect<"paste" | "local-server">({
-    message: "How do you want to complete OAuth callback?",
-    options: [
-      { label: "Paste redirect URL (or code / code#state)", value: "paste" },
-      { label: "Use local callback server", value: "local-server" },
-    ],
-    initialValue: "paste",
-  });
-
-  let authResult: { code: string; state?: string };
-
-  if (callbackMode === "local-server") {
-    console.log("[reviewflux] opening browser for OAuth login...");
-    const opened = openBrowser(loginUrl);
-    if (!opened) {
-      console.log("[reviewflux] browser auto-open failed. open the URL above manually.");
-    }
-
-    console.log("[reviewflux] waiting for OAuth callback...");
-    authResult = await waitForOAuthCode({ redirectUri, expectedState: state });
-    console.log("[reviewflux] callback received.");
-  } else {
-    const pasted = await promptText({ message: "Paste redirect URL (or code / code#state)" });
-    authResult = extractAuthCode(pasted);
-    assertOAuthState({ expectedState: state, actualState: authResult.state, requireState: true });
-  }
-
-  console.log("[reviewflux] requesting access token...");
-  const token = await requestOAuthToken({
-    tokenUrl,
-    clientId,
-    code: authResult.code,
-    redirectUri,
-    codeVerifier,
-  });
-
-  return {
-    authorizeUrl,
-    tokenUrl,
-    clientId,
-    redirectUri,
-    accessToken: token.accessToken,
-    refreshToken: token.refreshToken,
-    tokenType: token.tokenType,
-    expiresAtEpochMs: token.expiresInSec ? Date.now() + token.expiresInSec * 1000 : undefined,
-  };
+async function collectOAuthConfig(provider: LlmProvider, options: SetupOptions): Promise<NonNullable<ReviewFluxConfig["oauth"]>> {
+  return createOAuthSetupStrategy(provider).collectOAuthConfig(options);
 }
 
 async function runSetup(options: SetupOptions): Promise<void> {
@@ -486,7 +521,7 @@ async function runSetup(options: SetupOptions): Promise<void> {
       },
     };
   } else {
-    const oauth = await collectOAuthConfig(options);
+    const oauth = await collectOAuthConfig(provider, options);
     const model = await pickDefaultModel({
       message: "Select default model (OAuth verified)",
       authMode: "oauth",
