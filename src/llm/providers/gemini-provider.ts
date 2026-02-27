@@ -1,15 +1,15 @@
 import type { ChatInput } from "../types.js";
 
-type GeminiNativeClientOptions = {
+type GeminiProviderClientOptions = {
   baseUrl: string;
   model: string;
   timeoutMs?: number;
 } &
   ({ authMode: "apikey"; apiKey: string } | { authMode: "oauth"; accessTokenProvider: () => Promise<string> });
 
-export class GeminiNativeClient {
+export class GeminiProviderClient {
   constructor(
-    private readonly options: GeminiNativeClientOptions,
+    private readonly options: GeminiProviderClientOptions,
     private readonly fetchImpl: typeof fetch = fetch,
   ) {}
 

@@ -1,14 +1,14 @@
 import type { ChatInput } from "../types.js";
 
-type OpenAICompatibleClientOptions = {
+type OpenAIProviderClientOptions = {
   baseUrl: string;
   model: string;
   timeoutMs?: number;
 };
 
-export class OpenAICompatibleClient {
+export class OpenAIProviderClient {
   constructor(
-    private readonly options: OpenAICompatibleClientOptions,
+    private readonly options: OpenAIProviderClientOptions,
     private readonly authHeaderProvider: () => Promise<Record<string, string>>,
     private readonly fetchImpl: typeof fetch = fetch,
   ) {}

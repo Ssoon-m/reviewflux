@@ -1,16 +1,16 @@
 import { OAuthTokenProvider } from "../auth/oauth-token-provider.js";
-import { GeminiNativeClient } from "./providers/gemini-native.js";
-import { OpenAICompatibleClient } from "./providers/openai-compatible.js";
+import { GeminiProviderClient } from "./providers/gemini-provider.js";
+import { OpenAIProviderClient } from "./providers/openai-provider.js";
 import type { LlmProvider, LlmProviderName } from "./types.js";
 
 export class OAuthLlmClient implements LlmProvider {
-  private readonly inner: OpenAICompatibleClient;
+  private readonly inner: OpenAIProviderClient;
 
   constructor(
     options: { baseUrl: string; model: string; timeoutMs?: number; tokenProvider: OAuthTokenProvider },
     fetchImpl: typeof fetch = fetch,
   ) {
-    this.inner = new OpenAICompatibleClient(
+    this.inner = new OpenAIProviderClient(
       options,
       async () => ({ authorization: `Bearer ${await options.tokenProvider.getAccessToken()}` }),
       fetchImpl,
@@ -23,13 +23,13 @@ export class OAuthLlmClient implements LlmProvider {
 }
 
 export class OpenAIApiKeyLlmClient implements LlmProvider {
-  private readonly inner: OpenAICompatibleClient;
+  private readonly inner: OpenAIProviderClient;
 
   constructor(
     options: { baseUrl: string; model: string; timeoutMs?: number; apiKey: string },
     fetchImpl: typeof fetch = fetch,
   ) {
-    this.inner = new OpenAICompatibleClient(options, async () => ({ authorization: `Bearer ${options.apiKey}` }), fetchImpl);
+    this.inner = new OpenAIProviderClient(options, async () => ({ authorization: `Bearer ${options.apiKey}` }), fetchImpl);
   }
 
   generateReply(messages: Parameters<LlmProvider["generateReply"]>[0]): ReturnType<LlmProvider["generateReply"]> {
@@ -38,7 +38,7 @@ export class OpenAIApiKeyLlmClient implements LlmProvider {
 }
 
 export class GeminiLlmClient implements LlmProvider {
-  private readonly inner: GeminiNativeClient;
+  private readonly inner: GeminiProviderClient;
 
   constructor(
     options:
@@ -46,7 +46,7 @@ export class GeminiLlmClient implements LlmProvider {
       | { baseUrl: string; model: string; timeoutMs?: number; accessTokenProvider: () => Promise<string>; authMode: "oauth" },
     fetchImpl: typeof fetch = fetch,
   ) {
-    this.inner = new GeminiNativeClient(options, fetchImpl);
+    this.inner = new GeminiProviderClient(options, fetchImpl);
   }
 
   generateReply(messages: Parameters<LlmProvider["generateReply"]>[0]): ReturnType<LlmProvider["generateReply"]> {
