@@ -1,32 +1,10 @@
+import { MODELS } from "@mariozechner/pi-ai/dist/models.generated.js";
 import type { AppConfig } from "../config/env.js";
 import { normalizeProviderId } from "./provider-normalizer.js";
 import type { LlmProviderName } from "./types.js";
 
-export type ProviderModelCatalog = Record<LlmProviderName, Set<string>>;
-
-export const OPENAI_MODELS = [
-  "gpt-4o",
-  "gpt-4o-mini",
-  "gpt-4.1",
-  "gpt-4.1-mini",
-  "gpt-5-codex",
-  "gpt-5.3-codex",
-] as const;
-
-export const GEMINI_MODELS = [
-  "gemini-2.5-pro",
-  "gemini-2.5-flash",
-  "gemini-2.5-flash-lite",
-  "gemini-2.6-pro",
-  "gemini-2.6-flash",
-  "gemini-3-pro-preview",
-  "gemini-3-flash-preview",
-  "gemini-3.1-pro-preview",
-  "gemini-3.1-flash-preview",
-] as const;
-
-export type OpenAIModelId = (typeof OPENAI_MODELS)[number];
-export type GeminiModelId = (typeof GEMINI_MODELS)[number];
+export type OpenAIModelId = (keyof (typeof MODELS)["openai"]) & string;
+export type GeminiModelId = (keyof (typeof MODELS)["google"]) & string;
 
 export type KnownModelIdByProvider = {
   openai: OpenAIModelId;
@@ -37,21 +15,26 @@ export type KnownModelRef =
   | { provider: "openai"; model: OpenAIModelId }
   | { provider: "gemini"; model: GeminiModelId };
 
+export type ProviderModelCatalog = Record<LlmProviderName, Set<string>>;
+
+const GEMINI_MODEL_ALIASES: Record<string, string> = {
+  "gemini-3-pro": "gemini-3-pro-preview",
+  "gemini-3.1-pro": "gemini-3-pro-preview",
+  "gemini-3-flash": "gemini-3-flash-preview",
+  "gemini-3.1-flash": "gemini-3-flash-preview",
+  "gemini-2.6": "gemini-2.6-pro",
+};
+
 export function normalizeProviderModelId(provider: LlmProviderName, model: string): string {
   const trimmed = model.trim();
   if (provider !== "gemini") return trimmed;
-
-  if (trimmed === "gemini-3-pro" || trimmed === "gemini-3.1-pro") return "gemini-3-pro-preview";
-  if (trimmed === "gemini-3-flash" || trimmed === "gemini-3.1-flash") return "gemini-3-flash-preview";
-  if (trimmed === "gemini-2.6") return "gemini-2.6-pro";
-
-  return trimmed;
+  return GEMINI_MODEL_ALIASES[trimmed] ?? trimmed;
 }
 
 export function defaultProviderModelCatalog(): ProviderModelCatalog {
   return {
-    openai: new Set(OPENAI_MODELS),
-    gemini: new Set(GEMINI_MODELS),
+    openai: new Set(Object.keys(MODELS.openai)),
+    gemini: new Set(Object.keys(MODELS.google).map((id) => normalizeProviderModelId("gemini", id))),
   };
 }
 
@@ -96,8 +79,8 @@ export function isKnownModelId<P extends LlmProviderName>(
   model: string,
 ): model is KnownModelIdByProvider[P] {
   if (provider === "openai") {
-    return (OPENAI_MODELS as readonly string[]).includes(model);
+    return model in MODELS.openai;
   }
-  return (GEMINI_MODELS as readonly string[]).includes(model);
+  const normalized = normalizeProviderModelId("gemini", model);
+  return normalized in MODELS.google;
 }
-
