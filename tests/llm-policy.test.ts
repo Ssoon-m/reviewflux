@@ -97,13 +97,13 @@ describe("model selection", () => {
     expect(resolveRequestedModelRef(config)).toEqual({ provider: "gemini", model: "gemini-2.5-flash" });
   });
 
-  it("accepts custom provider model catalog entries", () => {
+  it("rejects models that are not supported by pi-ai", () => {
     const config = makeConfig({
       LLM_PROVIDER: "gemini",
       LLM_MODEL: "gemini/gemini-2.6-ultra",
       LLM_PROVIDER_MODELS_JSON: '{"gemini":["gemini-2.6-ultra"]}',
     });
 
-    expect(resolveRequestedModelRef(config)).toEqual({ provider: "gemini", model: "gemini-2.6-ultra" });
+    expect(() => resolveRequestedModelRef(config)).toThrow("model_not_supported_by_pi_ai:google/gemini-2.6-ultra");
   });
 });

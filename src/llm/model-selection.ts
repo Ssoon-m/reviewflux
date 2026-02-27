@@ -1,3 +1,4 @@
+import { getModel } from "@mariozechner/pi-ai";
 import type { AppConfig } from "../config/env.js";
 import type { ModelRef } from "./model-ref.js";
 import { isModelSupported, normalizeProviderModelId, resolveProviderModelCatalog } from "./models-config.providers.js";
@@ -77,6 +78,11 @@ export function parseAllowedModelsCsv(raw: string | undefined, defaultProvider: 
   );
 }
 
+function resolvePiProvider(params: { provider: string; authMode: string }): "openai" | "openai-codex" | "google" {
+  if (params.provider === "gemini") return "google";
+  return params.authMode === "oauth" ? "openai-codex" : "openai";
+}
+
 export function resolveRequestedModelRef(config: AppConfig): ModelRef {
   const aliases = parseModelAliasesJson(config.LLM_MODEL_ALIASES_JSON);
   const aliasIndex = buildModelAliasIndex(aliases);
@@ -102,6 +108,11 @@ export function resolveRequestedModelRef(config: AppConfig): ModelRef {
     if (!allowlist.has(key)) {
       throw new Error(`model_not_allowed:${key}`);
     }
+  }
+
+  const piProvider = resolvePiProvider({ provider: resolved.provider, authMode: config.LLM_AUTH_MODE });
+  if (!getModel(piProvider, resolved.model as never)) {
+    throw new Error(`model_not_supported_by_pi_ai:${piProvider}/${resolved.model}`);
   }
 
   return resolved;

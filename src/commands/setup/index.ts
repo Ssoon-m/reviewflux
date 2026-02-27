@@ -1,7 +1,7 @@
 import { createServer } from "node:http";
 import { spawn, spawnSync } from "node:child_process";
 import { promptPassword, promptSelect, promptText } from "../../cli/clack-prompter.js";
-import { getModels, loginOpenAICodex, type OAuthCredentials } from "@mariozechner/pi-ai";
+import { getModel, getModels, loginOpenAICodex, type OAuthCredentials } from "@mariozechner/pi-ai";
 import {
   ensureReviewFluxHome,
   saveConfig,
@@ -48,12 +48,24 @@ function assertNonEmpty(value: string, field: string): string {
   return trimmed;
 }
 
+function resolvePiProviderForSetup(params: { authMode: AuthMode; provider: LlmProvider }): "openai" | "openai-codex" | "google" {
+  if (params.provider === "gemini") return "google";
+  return params.authMode === "oauth" ? "openai-codex" : "openai";
+}
+
+function assertModelSupportedByPiAi(params: { authMode: AuthMode; provider: LlmProvider; model: string }): void {
+  const piProvider = resolvePiProviderForSetup(params);
+  const resolved = getModel(piProvider, params.model as never);
+  if (!resolved) {
+    throw new Error(`model_not_supported_by_pi_ai:${piProvider}/${params.model}`);
+  }
+}
+
 function getSelectableModels(params: { authMode: AuthMode; provider: LlmProvider }): Array<{ id: string; name: string }> {
   if (params.provider === "gemini") {
-    return [
-      { id: "gemini-2.5-pro", name: "Gemini 2.5 Pro" },
-      { id: "gemini-2.5-flash", name: "Gemini 2.5 Flash" },
-    ];
+    return getModels("google")
+      .filter((model) => model.id.startsWith("gemini-"))
+      .map((model) => ({ id: model.id, name: model.name }));
   }
 
   if (params.authMode === "oauth") {
@@ -451,6 +463,7 @@ async function runSetup(options: SetupOptions): Promise<void> {
       provider,
       defaultModel: provider === "gemini" ? "gemini-2.5-flash" : "gpt-5-codex",
     });
+    assertModelSupportedByPiAi({ authMode: "apikey", provider, model });
     const effort = await pickEffort("medium");
 
     config = {
@@ -470,6 +483,7 @@ async function runSetup(options: SetupOptions): Promise<void> {
       provider,
       defaultModel: "gpt-5.3-codex",
     });
+    assertModelSupportedByPiAi({ authMode: "oauth", provider, model });
     const effort = await pickEffort("medium");
 
     config = {
