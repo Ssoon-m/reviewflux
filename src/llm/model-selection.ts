@@ -97,7 +97,7 @@ export function resolveRequestedModelRef(config: AppConfig): ModelRef {
     throw new Error(`invalid_model_reference:${config.LLM_MODEL}`);
   }
 
-  const catalog = resolveProviderModelCatalog(config);
+  const catalog = resolveProviderModelCatalog();
   if (!isModelSupported({ catalog, provider: resolved.provider, model: resolved.model })) {
     throw new Error(`unsupported_model_for_provider:${resolved.provider}/${resolved.model}`);
   }

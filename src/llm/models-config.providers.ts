@@ -1,6 +1,4 @@
 import { MODELS } from "@mariozechner/pi-ai/dist/models.generated.js";
-import type { AppConfig } from "../config/env.js";
-import { normalizeProviderId } from "./provider-normalizer.js";
 import type { LlmProviderName } from "./types.js";
 
 export type OpenAIModelId = (keyof (typeof MODELS)["openai"]) & string;
@@ -28,32 +26,8 @@ export function defaultProviderModelCatalog(): ProviderModelCatalog {
   };
 }
 
-export function parseProviderModelsJson(raw?: string): Partial<Record<LlmProviderName, string[]>> {
-  if (!raw?.trim()) return {};
-  const parsed = JSON.parse(raw) as Record<string, string[]>;
-
-  const out: Partial<Record<LlmProviderName, string[]>> = {};
-  for (const [providerRaw, models] of Object.entries(parsed)) {
-    const provider = normalizeProviderId(providerRaw);
-    if (!Array.isArray(models)) continue;
-    out[provider] = models.filter((v): v is string => typeof v === "string");
-  }
-
-  return out;
-}
-
-export function resolveProviderModelCatalog(config: AppConfig): ProviderModelCatalog {
-  const catalog = defaultProviderModelCatalog();
-  const custom = parseProviderModelsJson(config.LLM_PROVIDER_MODELS_JSON);
-
-  for (const [provider, models] of Object.entries(custom) as Array<[LlmProviderName, string[]]>) {
-    if (!models || models.length === 0) continue;
-    for (const model of models) {
-      catalog[provider].add(normalizeProviderModelId(provider, model));
-    }
-  }
-
-  return catalog;
+export function resolveProviderModelCatalog(): ProviderModelCatalog {
+  return defaultProviderModelCatalog();
 }
 
 export function isModelSupported(params: {

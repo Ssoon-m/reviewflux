@@ -8,7 +8,6 @@ function makeConfig(patch: Partial<AppConfig>): AppConfig {
     LLM_AUTH_MODE: "apikey",
     LLM_API_KEY: undefined,
     LLM_MODEL_ALIASES_JSON: undefined,
-    LLM_PROVIDER_MODELS_JSON: undefined,
     LLM_ALLOWED_MODELS: undefined,
     OAUTH_TOKEN_URL: "https://auth.example.com/token",
     OAUTH_CLIENT_ID: "id",

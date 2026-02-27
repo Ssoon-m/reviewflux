@@ -17,7 +17,6 @@ function makeConfig(patch: Partial<AppConfig>): AppConfig {
     LLM_AUTH_MODE: "apikey",
     LLM_API_KEY: "test-key",
     LLM_MODEL_ALIASES_JSON: undefined,
-    LLM_PROVIDER_MODELS_JSON: undefined,
     LLM_ALLOWED_MODELS: undefined,
     OAUTH_TOKEN_URL: undefined,
     OAUTH_CLIENT_ID: undefined,
@@ -99,9 +98,8 @@ describe("model selection", () => {
     const config = makeConfig({
       LLM_PROVIDER: "gemini",
       LLM_MODEL: "gemini/gemini-2.6-ultra",
-      LLM_PROVIDER_MODELS_JSON: '{"gemini":["gemini-2.6-ultra"]}',
     });
 
-    expect(() => resolveRequestedModelRef(config)).toThrow("model_not_supported_by_pi_ai:google/gemini-2.6-ultra");
+    expect(() => resolveRequestedModelRef(config)).toThrow("unsupported_model_for_provider:gemini/gemini-2.6-ultra");
   });
 });
