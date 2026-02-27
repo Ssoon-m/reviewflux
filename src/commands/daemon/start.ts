@@ -1,7 +1,7 @@
 import { setTimeout as wait } from "node:timers/promises";
 import { Agent } from "@mariozechner/pi-agent-core";
 import { getModel } from "@mariozechner/pi-ai";
-import { loadConfig, saveConfig, type ReviewFluxConfig } from "../../cli/config.js";
+import { getActiveAuthProfile, loadConfig, saveConfig, type ReviewFluxConfig } from "../../cli/config.js";
 
 type OAuthTokenResponse = {
   accessToken: string;
@@ -10,13 +10,27 @@ type OAuthTokenResponse = {
   expiresInSec?: number;
 };
 
-function resolveApiKeyForDaemon(cfg: ReviewFluxConfig): string {
+function resolveDaemonAuth(cfg: ReviewFluxConfig):
+  | { mode: "oauth"; oauth: NonNullable<ReviewFluxConfig["oauth"]> }
+  | { mode: "apikey"; apiKey: NonNullable<ReviewFluxConfig["apiKey"]> } {
+  const provider = cfg.llm;
+  const profile = getActiveAuthProfile(cfg, provider);
+
+  if (profile?.mode === "oauth") {
+    return { mode: "oauth", oauth: profile.oauth };
+  }
+  if (profile?.mode === "apikey") {
+    return { mode: "apikey", apiKey: profile.apiKey };
+  }
+
+  // Legacy fallback (single-auth config)
   if (cfg.authMode === "oauth" && cfg.oauth?.accessToken) {
-    return cfg.oauth.accessToken;
+    return { mode: "oauth", oauth: cfg.oauth };
   }
   if (cfg.authMode === "apikey" && cfg.apiKey?.key?.trim()) {
-    return cfg.apiKey.key.trim();
+    return { mode: "apikey", apiKey: cfg.apiKey };
   }
+
   throw new Error("daemon_missing_credentials");
 }
 
@@ -98,29 +112,41 @@ export async function runDaemonStartCommand(): Promise<void> {
   const cfg = loadConfig();
   console.log("[reviewflux] daemon start");
 
+  const activeAuth = resolveDaemonAuth(cfg);
+
   if (
-    cfg.authMode === "oauth" &&
-    cfg.oauth?.accessToken &&
-    cfg.oauth.expiresAtEpochMs &&
-    cfg.oauth.refreshToken &&
-    cfg.oauth.tokenUrl &&
-    cfg.oauth.clientId &&
-    Date.now() >= cfg.oauth.expiresAtEpochMs - 10_000
+    activeAuth.mode === "oauth" &&
+    activeAuth.oauth.accessToken &&
+    activeAuth.oauth.expiresAtEpochMs &&
+    activeAuth.oauth.refreshToken &&
+    activeAuth.oauth.tokenUrl &&
+    activeAuth.oauth.clientId &&
+    Date.now() >= activeAuth.oauth.expiresAtEpochMs - 10_000
   ) {
     console.log("[reviewflux] access token expired soon. refreshing...");
     const token = await refreshOAuthToken({
-      tokenUrl: cfg.oauth.tokenUrl,
-      clientId: cfg.oauth.clientId,
-      refreshToken: cfg.oauth.refreshToken,
+      tokenUrl: activeAuth.oauth.tokenUrl,
+      clientId: activeAuth.oauth.clientId,
+      refreshToken: activeAuth.oauth.refreshToken,
     });
-    cfg.oauth.accessToken = token.accessToken;
-    cfg.oauth.refreshToken = token.refreshToken ?? cfg.oauth.refreshToken;
-    cfg.oauth.tokenType = token.tokenType ?? cfg.oauth.tokenType;
-    cfg.oauth.expiresAtEpochMs = token.expiresInSec ? Date.now() + token.expiresInSec * 1000 : undefined;
+
+    activeAuth.oauth.accessToken = token.accessToken;
+    activeAuth.oauth.refreshToken = token.refreshToken ?? activeAuth.oauth.refreshToken;
+    activeAuth.oauth.tokenType = token.tokenType ?? activeAuth.oauth.tokenType;
+    activeAuth.oauth.expiresAtEpochMs = token.expiresInSec ? Date.now() + token.expiresInSec * 1000 : undefined;
+
+    // Keep legacy top-level fields in sync when they exist
+    if (cfg.oauth) {
+      cfg.oauth.accessToken = activeAuth.oauth.accessToken;
+      cfg.oauth.refreshToken = activeAuth.oauth.refreshToken;
+      cfg.oauth.tokenType = activeAuth.oauth.tokenType;
+      cfg.oauth.expiresAtEpochMs = activeAuth.oauth.expiresAtEpochMs;
+    }
+
     saveConfig(cfg);
   }
 
-  const apiKey = resolveApiKeyForDaemon(cfg);
+  const apiKey = activeAuth.mode === "oauth" ? activeAuth.oauth.accessToken : activeAuth.apiKey.key.trim();
 
   console.log("[reviewflux] waiting 3 seconds before test request...");
   await wait(3000);
@@ -144,7 +170,7 @@ export async function runDaemonStartCommand(): Promise<void> {
       }
 
       if (cfg.llm === "gemini") return "google";
-      if (cfg.llm === "codex" || cfg.authMode === "oauth") return "openai-codex";
+      if (cfg.llm === "codex" || activeAuth.mode === "oauth") return "openai-codex";
       return "openai";
     };
 

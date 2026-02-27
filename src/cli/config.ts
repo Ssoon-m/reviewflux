@@ -8,6 +8,33 @@ export type EffortLevel = "low" | "medium" | "high" | "xhigh";
 
 export type LlmProvider = "codex" | "gemini" | "openai" | "anthropic";
 
+export type OAuthConfig = {
+  authorizeUrl?: string;
+  tokenUrl?: string;
+  clientId?: string;
+  redirectUri?: string;
+  accessToken: string;
+  refreshToken?: string;
+  tokenType?: string;
+  expiresAtEpochMs?: number;
+};
+
+export type ApiKeyConfig = {
+  key: string;
+};
+
+export type AuthProfile =
+  | {
+      provider: LlmProvider;
+      mode: "oauth";
+      oauth: OAuthConfig;
+    }
+  | {
+      provider: LlmProvider;
+      mode: "apikey";
+      apiKey: ApiKeyConfig;
+    };
+
 export type ReviewFluxConfig = {
   appName: "reviewflux";
   llm: LlmProvider;
@@ -18,18 +45,13 @@ export type ReviewFluxConfig = {
   modelAliases?: Record<string, { provider: LlmProvider; model: string }>;
   repoModelPolicies?: Record<string, { defaultAlias?: string; taskAliases?: Record<string, string> }>;
   effort?: EffortLevel;
-  oauth?: {
-    authorizeUrl?: string;
-    tokenUrl?: string;
-    clientId?: string;
-    redirectUri?: string;
-    accessToken: string;
-    refreshToken?: string;
-    tokenType?: string;
-    expiresAtEpochMs?: number;
-  };
-  apiKey?: {
-    key: string;
+  // Legacy single-auth fields (kept for backwards compatibility)
+  oauth?: OAuthConfig;
+  apiKey?: ApiKeyConfig;
+  // OpenClaw-style provider auth profiles
+  auth?: {
+    profiles?: Record<string, AuthProfile>;
+    order?: Partial<Record<LlmProvider, string[]>>;
   };
 };
 
@@ -66,4 +88,21 @@ export function loadConfig(home: string = homedir()): ReviewFluxConfig {
 
   const raw = readFileSync(path, "utf8");
   return JSON.parse(raw) as ReviewFluxConfig;
+}
+
+export function getActiveAuthProfile(config: ReviewFluxConfig, provider: LlmProvider): AuthProfile | undefined {
+  const profiles = config.auth?.profiles;
+  if (!profiles) return undefined;
+
+  const ordered = config.auth?.order?.[provider] ?? [];
+  for (const profileId of ordered) {
+    const profile = profiles[profileId];
+    if (profile && profile.provider === provider) return profile;
+  }
+
+  for (const profile of Object.values(profiles)) {
+    if (profile.provider === provider) return profile;
+  }
+
+  return undefined;
 }

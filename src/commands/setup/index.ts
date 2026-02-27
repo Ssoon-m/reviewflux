@@ -463,6 +463,7 @@ async function runSetup(options: SetupOptions): Promise<void> {
     assertModelSupportedByPiAi({ authMode: "apikey", provider, model });
     const effort = await pickEffort("medium");
 
+    const profileId = `${provider}:default`;
     config = {
       appName: "reviewflux",
       llm: provider,
@@ -471,6 +472,18 @@ async function runSetup(options: SetupOptions): Promise<void> {
       model,
       effort,
       apiKey: { key },
+      auth: {
+        profiles: {
+          [profileId]: {
+            provider,
+            mode: "apikey",
+            apiKey: { key },
+          },
+        },
+        order: {
+          [provider]: [profileId],
+        },
+      },
     };
   } else {
     const oauth = await collectOAuthConfig(options);
@@ -483,6 +496,7 @@ async function runSetup(options: SetupOptions): Promise<void> {
     assertModelSupportedByPiAi({ authMode: "oauth", provider, model });
     const effort = await pickEffort("medium");
 
+    const profileId = `${provider}:default`;
     config = {
       appName: "reviewflux",
       llm: provider,
@@ -491,6 +505,18 @@ async function runSetup(options: SetupOptions): Promise<void> {
       model,
       effort,
       oauth,
+      auth: {
+        profiles: {
+          [profileId]: {
+            provider,
+            mode: "oauth",
+            oauth,
+          },
+        },
+        order: {
+          [provider]: [profileId],
+        },
+      },
     };
   }
 
