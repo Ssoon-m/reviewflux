@@ -3,6 +3,7 @@ import { Agent } from "@mariozechner/pi-agent-core";
 import { getModel } from "@mariozechner/pi-ai";
 import { apiKeyFromPiOAuth, refreshWithPiOAuth } from "../../auth/pi-oauth.js";
 import { getActiveAuthProfile, loadConfig, saveConfig, type ReviewFluxConfig } from "../../cli/config.js";
+import { resolveCodexEffort } from "../../llm/reasoning-effort.js";
 
 function resolveDaemonAuth(cfg: ReviewFluxConfig):
   | { mode: "oauth"; oauth: NonNullable<ReviewFluxConfig["oauth"]> }
@@ -90,9 +91,14 @@ export async function runDaemonStartCommand(): Promise<void> {
   try {
     const modelProvider = resolvePiProvider({ llm: cfg.llm, authMode: activeAuth.mode, selectedModel });
     const modelId = selectedModel.includes("/") ? selectedModel.split("/").slice(1).join("/") : selectedModel;
-    const effort = cfg.effort ?? "medium";
+    const effort =
+      cfg.llm === "codex"
+        ? resolveCodexEffort({ authMode: activeAuth.mode, model: modelId, requested: cfg.effort })
+        : undefined;
 
-    console.log(`[reviewflux] testing model: ${modelId} (provider=${modelProvider}, effort=${effort})`);
+    console.log(
+      `[reviewflux] testing model: ${modelId} (provider=${modelProvider}${effort ? `, effort=${effort}` : ""})`,
+    );
     const model = getModel(modelProvider as never, modelId as never);
     if (!model) throw new Error(`model_not_supported:${modelProvider}/${modelId}`);
 
@@ -107,7 +113,9 @@ export async function runDaemonStartCommand(): Promise<void> {
     const agent = new Agent({ getApiKey: async () => apiKey });
     agent.setSystemPrompt("You are a helpful assistant.");
     agent.setModel(modelWithBaseUrl);
-    agent.setThinkingLevel(effort);
+    if (effort) {
+      agent.setThinkingLevel(effort);
+    }
 
     await agent.prompt("안녕?");
     const text = extractAssistantText(agent.state.messages as unknown[]);

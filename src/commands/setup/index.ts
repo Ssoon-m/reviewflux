@@ -9,6 +9,7 @@ import {
   type ReviewFluxConfig,
 } from "../../cli/config.js";
 import { loginWithPiOAuth, resolveOAuthProviderId } from "../../auth/pi-oauth.js";
+import { getCodexEffortLevels } from "../../llm/reasoning-effort.js";
 
 type SetupOptions = { advanced: boolean };
 
@@ -163,6 +164,21 @@ async function collectOAuthConfig(provider: LlmProvider): Promise<NonNullable<Re
   });
 }
 
+async function pickCodexEffort(params: {
+  authMode: AuthMode;
+  model: string;
+  defaultEffort?: "low" | "medium" | "high" | "xhigh";
+}): Promise<"low" | "medium" | "high" | "xhigh"> {
+  const supported = getCodexEffortLevels({ authMode: params.authMode, model: params.model });
+  const fallback = supported.includes("medium") ? "medium" : supported[0] ?? "low";
+
+  return promptSelect<"low" | "medium" | "high" | "xhigh">({
+    message: `Select reasoning effort (${supported.join("/")})`,
+    options: supported.map((level) => ({ label: level, value: level })),
+    initialValue: params.defaultEffort && supported.includes(params.defaultEffort) ? params.defaultEffort : fallback,
+  });
+}
+
 async function runSetup(options: SetupOptions): Promise<void> {
   const home = ensureReviewFluxHome();
 
@@ -210,12 +226,15 @@ async function runSetup(options: SetupOptions): Promise<void> {
     });
     assertModelSupportedByPiAi({ authMode, provider, model });
 
+    const effort = provider === "codex" ? await pickCodexEffort({ authMode, model, defaultEffort: "medium" }) : undefined;
+
     const config: ReviewFluxConfig = {
       appName: "reviewflux",
       llm: provider,
       authMode,
       llmApiBaseUrl,
       model,
+      ...(effort ? { effort } : {}),
       apiKey: { key },
       auth: {
         profiles: {
@@ -246,12 +265,15 @@ async function runSetup(options: SetupOptions): Promise<void> {
   });
   assertModelSupportedByPiAi({ authMode, provider, model });
 
+  const effort = provider === "codex" ? await pickCodexEffort({ authMode, model, defaultEffort: "medium" }) : undefined;
+
   const config: ReviewFluxConfig = {
     appName: "reviewflux",
     llm: provider,
     authMode,
     llmApiBaseUrl,
     model,
+    ...(effort ? { effort } : {}),
     oauth,
     auth: {
       profiles: {
