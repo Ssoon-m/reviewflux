@@ -1,20 +1,12 @@
-import { MODELS } from "@mariozechner/pi-ai/dist/models.generated.js";
+import { getModels, getProviders } from "@mariozechner/pi-ai";
 import type { LlmProviderName } from "./types.js";
 
-type ProviderModels<TKey extends string> =
-  TKey extends keyof typeof MODELS ? (typeof MODELS)[TKey] : Record<never, never>;
+export type OpenAIModelId = string;
+export type GeminiModelId = string;
 
-export type OpenAIModelId = (keyof ProviderModels<"openai">) & string;
-export type GeminiModelId = (keyof ProviderModels<"google">) & string;
+export type KnownModelIdByProvider = Record<string, string>;
 
-export type KnownModelIdByProvider = {
-  openai: OpenAIModelId;
-  gemini: GeminiModelId;
-};
-
-export type KnownModelRef =
-  | { provider: "openai"; model: OpenAIModelId }
-  | { provider: "gemini"; model: GeminiModelId };
+export type KnownModelRef = { provider: string; model: string };
 
 export type ProviderModelCatalog = Record<LlmProviderName, Set<string>>;
 
@@ -23,19 +15,25 @@ export function normalizeProviderModelId(_provider: LlmProviderName, model: stri
 }
 
 function getProviderModelKeys(provider: string): string[] {
-  const table = MODELS as Record<string, Record<string, unknown>>;
-  const providerModels = table[provider];
-  if (!providerModels || typeof providerModels !== "object") {
-    return [];
-  }
-  return Object.keys(providerModels);
+  return getModels(provider as never).map((model) => model.id);
 }
 
 export function defaultProviderModelCatalog(): ProviderModelCatalog {
-  return {
-    openai: new Set(getProviderModelKeys("openai")),
-    gemini: new Set(getProviderModelKeys("google").map((id) => normalizeProviderModelId("gemini", id))),
-  };
+  const catalog: ProviderModelCatalog = {};
+  for (const provider of getProviders()) {
+    catalog[provider] = new Set(getProviderModelKeys(provider));
+  }
+
+  // Backward-compat aliases used by existing config/tests.
+  if (!catalog.gemini && catalog.google) {
+    catalog.gemini = new Set(catalog.google);
+  }
+
+  if (!catalog.codex && catalog["openai-codex"]) {
+    catalog.codex = new Set(catalog["openai-codex"]);
+  }
+
+  return catalog;
 }
 
 export function resolveProviderModelCatalog(): ProviderModelCatalog {
@@ -50,13 +48,6 @@ export function isModelSupported(params: {
   return params.catalog[params.provider]?.has(normalizeProviderModelId(params.provider, params.model)) ?? false;
 }
 
-export function isKnownModelId<P extends LlmProviderName>(
-  provider: P,
-  model: string,
-): model is KnownModelIdByProvider[P] {
-  if (provider === "openai") {
-    return getProviderModelKeys("openai").includes(model);
-  }
-  const normalized = normalizeProviderModelId("gemini", model);
-  return getProviderModelKeys("google").includes(normalized);
+export function isKnownModelId<P extends LlmProviderName>(_provider: P, _model: string): _model is KnownModelIdByProvider[P] {
+  return true;
 }

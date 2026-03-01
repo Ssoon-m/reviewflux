@@ -1,3 +1,4 @@
+import { getProviders } from "@mariozechner/pi-ai";
 import type { LlmProviderName } from "./types.js";
 
 const PROVIDER_ALIASES: Record<string, LlmProviderName> = {
@@ -10,9 +11,15 @@ const PROVIDER_ALIASES: Record<string, LlmProviderName> = {
 
 export function normalizeProviderId(raw: string): LlmProviderName {
   const normalized = raw.trim().toLowerCase();
-  const mapped = PROVIDER_ALIASES[normalized];
-  if (!mapped) {
-    throw new Error(`unsupported_provider:${raw}`);
+  const mapped = PROVIDER_ALIASES[normalized] ?? normalized;
+
+  if (PROVIDER_ALIASES[normalized]) {
+    return mapped;
   }
-  return mapped;
+
+  if (getProviders().includes(mapped as never)) {
+    return mapped;
+  }
+
+  throw new Error(`unsupported_provider:${raw}`);
 }

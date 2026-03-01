@@ -78,11 +78,14 @@ export function parseAllowedModelsCsv(raw: string | undefined, defaultProvider: 
   );
 }
 
-function resolvePiProvider(params: { provider: string; authMode: string }): "openai" | "openai-codex" | "google" | "google-gemini-cli" {
+function resolvePiProvider(params: { provider: string; authMode: string }): string {
   if (params.provider === "gemini") {
     return params.authMode === "oauth" ? "google-gemini-cli" : "google";
   }
-  return params.authMode === "oauth" ? "openai-codex" : "openai";
+  if (params.provider === "openai") {
+    return params.authMode === "oauth" ? "openai-codex" : "openai";
+  }
+  return params.provider;
 }
 
 export function resolveRequestedModelRef(config: AppConfig): ModelRef {

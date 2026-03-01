@@ -6,16 +6,31 @@ function resolveApiKey(config: AppConfig, provider: LlmProviderName): string {
   const explicit = config.LLM_API_KEY?.trim();
   if (explicit) return explicit;
 
-  if (provider === "gemini") {
-    const key = process.env.GEMINI_API_KEY?.trim();
-    if (key) return key;
-    throw new Error("api_key_not_found_for_provider:gemini");
+  const normalized = provider.trim().toLowerCase();
+  const envCandidates = [
+    `${normalized.replace(/[^a-z0-9]/g, "_").toUpperCase()}_API_KEY`,
+    normalized === "google" || normalized === "google-gemini-cli" ? "GEMINI_API_KEY" : undefined,
+    normalized === "openai" || normalized === "openai-codex" ? "OPENAI_API_KEY" : undefined,
+  ].filter(Boolean) as string[];
+
+  for (const keyName of envCandidates) {
+    const value = process.env[keyName]?.trim();
+    if (value) return value;
   }
 
-  const key = process.env.OPENAI_API_KEY?.trim();
-  if (key) return key;
+  throw new Error(`api_key_not_found_for_provider:${provider}`);
+}
 
-  throw new Error("api_key_not_found_for_provider:openai");
+function resolveProviderForAuth(params: { provider: string; authMode: "oauth" | "apikey" }): string {
+  if (params.provider === "gemini") {
+    return params.authMode === "oauth" ? "google-gemini-cli" : "gemini";
+  }
+
+  if (params.provider === "openai") {
+    return params.authMode === "oauth" ? "openai-codex" : "openai";
+  }
+
+  return params.provider;
 }
 
 export function resolveAuthInput(params: {
@@ -39,9 +54,14 @@ export function resolveAuthInput(params: {
       timeoutMs?: number;
       apiKey: string;
     } {
-  const { config, provider, model } = params;
+  const { config, model } = params;
+  const provider = resolveProviderForAuth({ provider: params.provider, authMode: config.LLM_AUTH_MODE });
 
   if (config.LLM_AUTH_MODE === "oauth") {
+    if (provider !== "openai-codex" && provider !== "google-gemini-cli") {
+      throw new Error(`oauth_not_supported_for_provider:${provider}`);
+    }
+
     return {
       authMode: "oauth",
       provider,
