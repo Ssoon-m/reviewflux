@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from "node:child_process";
-import { getModel, getModels } from "@mariozechner/pi-ai";
+import { getModel, getModels, getProviders } from "@mariozechner/pi-ai";
 import { promptPassword, promptSelect, promptText } from "../../cli/clack-prompter.js";
 import {
   ensureReviewFluxHome,
@@ -13,7 +13,7 @@ import { getCodexEffortLevels } from "../../llm/reasoning-effort.js";
 
 type SetupOptions = { advanced: boolean };
 
-const DEFAULT_MODEL = "gpt-5.3-codex";
+type OAuthCapableProvider = "openai-codex" | "google-gemini-cli";
 
 function parseSetupOptions(args: string[]): SetupOptions {
   return { advanced: args.includes("--advanced") };
@@ -25,14 +25,24 @@ function assertNonEmpty(value: string, field: string): string {
   return trimmed;
 }
 
-function resolvePiProviderForSetup(params: {
-  authMode: AuthMode;
-  provider: LlmProvider;
-}): "openai" | "openai-codex" | "google" | "google-gemini-cli" {
+function getProviderChoices(): string[] {
+  return getProviders().slice().sort((a, b) => a.localeCompare(b));
+}
+
+function isOAuthCapableProvider(provider: string): provider is OAuthCapableProvider {
+  return provider === "openai-codex" || provider === "google-gemini-cli";
+}
+
+function resolveApiProviderForSetup(params: { authMode: AuthMode; provider: LlmProvider }): string {
   if (params.provider === "gemini") {
     return params.authMode === "oauth" ? "google-gemini-cli" : "google";
   }
-  return params.authMode === "oauth" ? "openai-codex" : "openai";
+
+  if (params.provider === "openai") {
+    return params.authMode === "oauth" ? "openai-codex" : "openai";
+  }
+
+  return params.provider;
 }
 
 function assertModelSupportedByPiAi(params: {
@@ -40,8 +50,8 @@ function assertModelSupportedByPiAi(params: {
   provider: LlmProvider;
   model: string;
 }): void {
-  const piProvider = resolvePiProviderForSetup(params);
-  const resolved = getModel(piProvider, params.model as never);
+  const piProvider = resolveApiProviderForSetup(params);
+  const resolved = getModel(piProvider as never, params.model as never);
   if (!resolved) throw new Error(`model_not_supported_by_pi_ai:${piProvider}/${params.model}`);
 }
 
@@ -49,21 +59,11 @@ function getSelectableModels(params: {
   authMode: AuthMode;
   provider: LlmProvider;
 }): Array<{ id: string; name: string }> {
-  const provider = resolvePiProviderForSetup(params);
+  const provider = resolveApiProviderForSetup(params);
 
-  if (provider === "google" || provider === "google-gemini-cli") {
-    return getModels(provider)
-      .filter((model) => model.id.startsWith("gemini-"))
-      .map((model) => ({ id: model.id, name: model.name }));
-  }
-
-  if (provider === "openai-codex") {
-    return getModels("openai-codex").map((model) => ({ id: model.id, name: model.name }));
-  }
-
-  return getModels("openai")
-    .filter((model) => model.id.includes("codex"))
-    .map((model) => ({ id: model.id, name: model.name }));
+  return getModels(provider as never)
+    .map((model) => ({ id: model.id, name: model.name }))
+    .sort((a, b) => a.id.localeCompare(b.id));
 }
 
 async function pickDefaultModel(params: {
@@ -73,12 +73,16 @@ async function pickDefaultModel(params: {
   defaultModel?: string;
 }): Promise<string> {
   const available = getSelectableModels(params);
-  const fallback = available.find((m) => m.id === DEFAULT_MODEL)?.id ?? available[0]?.id ?? "gpt-5-codex";
+  const fallback = params.defaultModel ?? available[0]?.id;
+
+  if (!fallback) {
+    throw new Error(`no_models_for_provider:${params.provider}`);
+  }
 
   return promptSelect<string>({
     message: params.message,
     options: available.map((model) => ({ label: `${model.id} (${model.name})`, value: model.id })),
-    initialValue: params.defaultModel ?? fallback,
+    initialValue: fallback,
   });
 }
 
@@ -106,7 +110,7 @@ function openBrowser(url: string): boolean {
   return spawnDetached("xdg-open", [url]);
 }
 
-async function collectOAuthConfig(provider: LlmProvider): Promise<NonNullable<ReviewFluxConfig["oauth"]>> {
+async function collectOAuthConfig(provider: OAuthCapableProvider): Promise<NonNullable<ReviewFluxConfig["oauth"]>> {
   const oauthMode = await promptSelect<"browser" | "paste">({
     message: "OAuth setup method",
     options: [
@@ -179,32 +183,42 @@ async function pickCodexEffort(params: {
   });
 }
 
+function defaultBaseUrlForProvider(provider: string): string {
+  const firstModel = getModels(provider as never)[0];
+  return firstModel?.baseUrl ?? "https://api.openai.com/v1";
+}
+
 async function runSetup(options: SetupOptions): Promise<void> {
   const home = ensureReviewFluxHome();
 
   console.log("[reviewflux] setup started");
   console.log(`[reviewflux] config directory: ${home}`);
 
+  const providerChoices = getProviderChoices();
+  if (providerChoices.length === 0) {
+    throw new Error("no_providers_from_pi_ai");
+  }
+
   const provider = await promptSelect<LlmProvider>({
     message: "Select LLM provider",
-    options: [
-      { label: "codex (OpenAI)", value: "codex" },
-      { label: "gemini (Google)", value: "gemini" },
-    ],
-    initialValue: "codex",
+    options: providerChoices.map((p) => ({ label: p, value: p })),
+    initialValue: providerChoices.includes("openai-codex") ? "openai-codex" : providerChoices[0],
   });
+
+  const authModeOptions = isOAuthCapableProvider(provider)
+    ? [
+        { label: "OAuth", value: "oauth" as const },
+        { label: "API Key", value: "apikey" as const },
+      ]
+    : [{ label: "API Key", value: "apikey" as const }];
 
   const authMode = await promptSelect<AuthMode>({
     message: "Select auth mode",
-    options: [
-      { label: "OAuth", value: "oauth" },
-      { label: "API Key", value: "apikey" },
-    ],
-    initialValue: provider === "gemini" ? "apikey" : "oauth",
+    options: authModeOptions,
+    initialValue: authModeOptions.some((o) => o.value === "oauth") ? "oauth" : "apikey",
   });
 
-  const defaultBaseUrl =
-    provider === "gemini" ? "https://generativelanguage.googleapis.com/v1beta" : "https://api.openai.com/v1";
+  const defaultBaseUrl = defaultBaseUrlForProvider(resolveApiProviderForSetup({ authMode, provider }));
   let llmApiBaseUrl = defaultBaseUrl;
 
   if (options.advanced) {
@@ -222,11 +236,10 @@ async function runSetup(options: SetupOptions): Promise<void> {
       message: "Select default model",
       authMode,
       provider,
-      defaultModel: provider === "gemini" ? "gemini-2.5-flash" : "gpt-5-codex",
     });
     assertModelSupportedByPiAi({ authMode, provider, model });
 
-    const effort = provider === "codex" ? await pickCodexEffort({ authMode, model, defaultEffort: "medium" }) : undefined;
+    const effort = provider === "openai-codex" ? await pickCodexEffort({ authMode, model, defaultEffort: "medium" }) : undefined;
 
     const config: ReviewFluxConfig = {
       appName: "reviewflux",
@@ -256,16 +269,19 @@ async function runSetup(options: SetupOptions): Promise<void> {
     return;
   }
 
+  if (!isOAuthCapableProvider(provider)) {
+    throw new Error(`oauth_not_supported_for_provider:${provider}`);
+  }
+
   const oauth = await collectOAuthConfig(provider);
   const model = await pickDefaultModel({
     message: "Select default model (OAuth verified)",
     authMode,
     provider,
-    defaultModel: provider === "gemini" ? "gemini-2.5-flash" : "gpt-5.3-codex",
   });
   assertModelSupportedByPiAi({ authMode, provider, model });
 
-  const effort = provider === "codex" ? await pickCodexEffort({ authMode, model, defaultEffort: "medium" }) : undefined;
+  const effort = provider === "openai-codex" ? await pickCodexEffort({ authMode, model, defaultEffort: "medium" }) : undefined;
 
   const config: ReviewFluxConfig = {
     appName: "reviewflux",
