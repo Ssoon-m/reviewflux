@@ -3,6 +3,8 @@ import { Agent } from "@mariozechner/pi-agent-core";
 import { getModel } from "@mariozechner/pi-ai";
 import { apiKeyFromPiOAuth, refreshWithPiOAuth } from "../../auth/pi-oauth.js";
 import { getActiveAuthProfile, loadConfig, saveConfig, type ReviewFluxConfig } from "../../cli/config.js";
+import { isCustomProviderId } from "../../llm/custom-provider.js";
+import { createLlmProvider } from "../../llm/factory.js";
 import { resolveCodexEffort } from "../../llm/reasoning-effort.js";
 
 function resolveDaemonAuth(cfg: ReviewFluxConfig):
@@ -35,26 +37,17 @@ function extractAssistantText(messages: unknown[]): string {
   return "";
 }
 
+/** Use the provider id from config as the pi-ai provider (no hardcoded mapping). */
 function resolvePiProvider(params: {
   llm: ReviewFluxConfig["llm"];
   authMode: "oauth" | "apikey";
   selectedModel: string;
-}): "openai" | "openai-codex" | "google" | "google-gemini-cli" {
-  const { llm, authMode, selectedModel } = params;
-  if (selectedModel.includes("/")) {
-    const [rawProvider, ...rest] = selectedModel.split("/");
-    if (rest.length > 0) {
-      const normalized = rawProvider.trim().toLowerCase();
-      if (normalized === "google" || normalized === "gemini") {
-        return authMode === "oauth" ? "google-gemini-cli" : "google";
-      }
-      if (normalized === "openai-codex") return "openai-codex";
-      if (normalized === "openai") return authMode === "oauth" ? "openai-codex" : "openai";
-    }
+}): string {
+  if (params.selectedModel.includes("/")) {
+    const [rawProvider, ...rest] = params.selectedModel.split("/");
+    if (rest.length > 0 && rawProvider?.trim()) return rawProvider.trim();
   }
-
-  if (llm === "gemini") return authMode === "oauth" ? "google-gemini-cli" : "google";
-  return authMode === "oauth" ? "openai-codex" : "openai";
+  return params.llm;
 }
 
 export async function runDaemonStartCommand(): Promise<void> {
@@ -88,47 +81,57 @@ export async function runDaemonStartCommand(): Promise<void> {
     process.exit(1);
   }
 
+  const modelId = selectedModel.includes("/") ? selectedModel.split("/").slice(1).join("/") : selectedModel;
+
   try {
-    const modelProvider = resolvePiProvider({ llm: cfg.llm, authMode: activeAuth.mode, selectedModel });
-    const modelId = selectedModel.includes("/") ? selectedModel.split("/").slice(1).join("/") : selectedModel;
-    const effort =
-      cfg.llm === "codex"
-        ? resolveCodexEffort({ authMode: activeAuth.mode, model: modelId, requested: cfg.effort })
-        : undefined;
+    let text: string;
+    if (isCustomProviderId(cfg.llm)) {
+      const client = createLlmProvider({
+        authMode: "apikey",
+        provider: cfg.llm,
+        baseUrl: cfg.llmApiBaseUrl.replace(/\/$/, ""),
+        model: modelId,
+        apiKey,
+      });
+      console.log(`[reviewflux] testing model: ${modelId} (provider=${cfg.llm})`);
+      text = await client.generateReply([{ role: "user", content: "안녕?" }]);
+    } else {
+      const modelProvider = resolvePiProvider({ llm: cfg.llm, authMode: activeAuth.mode, selectedModel });
+      const effort =
+        cfg.llm === "openai-codex"
+          ? resolveCodexEffort({ authMode: activeAuth.mode, model: modelId, requested: cfg.effort })
+          : undefined;
 
-    console.log(
-      `[reviewflux] testing model: ${modelId} (provider=${modelProvider}${effort ? `, effort=${effort}` : ""})`,
-    );
-    const model = getModel(modelProvider as never, modelId as never);
-    if (!model) throw new Error(`model_not_supported:${modelProvider}/${modelId}`);
+      console.log(
+        `[reviewflux] testing model: ${modelId} (provider=${modelProvider}${effort ? `, effort=${effort}` : ""})`,
+      );
+      const model = getModel(modelProvider as never, modelId as never);
+      if (!model) throw new Error(`model_not_supported:${modelProvider}/${modelId}`);
 
-    const modelWithBaseUrl =
-      modelProvider === "openai-codex"
-        ? model
-        : {
-            ...model,
-            baseUrl: cfg.llmApiBaseUrl.replace(/\/$/, ""),
-          };
+      const modelWithBaseUrl =
+        modelProvider === "openai-codex"
+          ? model
+          : {
+              ...model,
+              baseUrl: cfg.llmApiBaseUrl.replace(/\/$/, ""),
+            };
 
-    const agent = new Agent({ getApiKey: async () => apiKey });
-    agent.setSystemPrompt("You are a helpful assistant.");
-    agent.setModel(modelWithBaseUrl);
-    if (effort) {
-      agent.setThinkingLevel(effort);
+      const agent = new Agent({ getApiKey: async () => apiKey });
+      agent.setSystemPrompt("You are a helpful assistant.");
+      agent.setModel(modelWithBaseUrl);
+      if (effort) {
+        agent.setThinkingLevel(effort);
+      }
+
+      await agent.prompt("안녕?");
+      text = extractAssistantText(agent.state.messages as unknown[]);
     }
-
-    await agent.prompt("안녕?");
-    const text = extractAssistantText(agent.state.messages as unknown[]);
 
     console.log("[reviewflux] response:");
     if (text.length > 0) {
       console.log(text);
     } else {
       console.log("(no text block returned)");
-      console.log("[reviewflux] message roles:");
-      console.log(agent.state.messages.map((message) => (message as { role?: string }).role).join(","));
-      console.log("[reviewflux] raw messages:");
-      console.log(JSON.stringify(agent.state.messages, null, 2));
     }
   } catch (error) {
     console.error("[reviewflux] request failed (pi-ai)");

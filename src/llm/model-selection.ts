@@ -1,5 +1,6 @@
 import { getModel } from "@mariozechner/pi-ai";
 import type { AppConfig } from "../config/env.js";
+import { isCustomProviderId } from "./custom-provider.js";
 import type { ModelRef } from "./model-ref.js";
 import { isModelSupported, normalizeProviderModelId, resolveProviderModelCatalog } from "./models-config.providers.js";
 import { normalizeProviderId } from "./provider-normalizer.js";
@@ -78,13 +79,8 @@ export function parseAllowedModelsCsv(raw: string | undefined, defaultProvider: 
   );
 }
 
+/** Use the provider id as the pi-ai provider (no hardcoded mapping). */
 function resolvePiProvider(params: { provider: string; authMode: string }): string {
-  if (params.provider === "gemini") {
-    return params.authMode === "oauth" ? "google-gemini-cli" : "google";
-  }
-  if (params.provider === "openai") {
-    return params.authMode === "oauth" ? "openai-codex" : "openai";
-  }
   return params.provider;
 }
 
@@ -102,9 +98,16 @@ export function resolveRequestedModelRef(config: AppConfig): ModelRef {
     throw new Error(`invalid_model_reference:${config.LLM_MODEL}`);
   }
 
-  const catalog = resolveProviderModelCatalog();
-  if (!isModelSupported({ catalog, provider: resolved.provider, model: resolved.model })) {
-    throw new Error(`unsupported_model_for_provider:${resolved.provider}/${resolved.model}`);
+  if (!isCustomProviderId(resolved.provider)) {
+    const catalog = resolveProviderModelCatalog();
+    if (!isModelSupported({ catalog, provider: resolved.provider, model: resolved.model })) {
+      throw new Error(`unsupported_model_for_provider:${resolved.provider}/${resolved.model}`);
+    }
+
+    const piProvider = resolvePiProvider({ provider: resolved.provider, authMode: config.LLM_AUTH_MODE });
+    if (!getModel(piProvider as never, resolved.model as never)) {
+      throw new Error(`model_not_supported_by_pi_ai:${piProvider}/${resolved.model}`);
+    }
   }
 
   const allowlist = parseAllowedModelsCsv(config.LLM_ALLOWED_MODELS, config.LLM_PROVIDER);
@@ -113,11 +116,6 @@ export function resolveRequestedModelRef(config: AppConfig): ModelRef {
     if (!allowlist.has(key)) {
       throw new Error(`model_not_allowed:${key}`);
     }
-  }
-
-  const piProvider = resolvePiProvider({ provider: resolved.provider, authMode: config.LLM_AUTH_MODE });
-  if (!getModel(piProvider, resolved.model as never)) {
-    throw new Error(`model_not_supported_by_pi_ai:${piProvider}/${resolved.model}`);
   }
 
   return resolved;

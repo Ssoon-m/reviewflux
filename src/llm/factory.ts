@@ -1,8 +1,10 @@
 import { completeSimple, getModel } from "@mariozechner/pi-ai";
 import type { AssistantMessage, Context, Message } from "@mariozechner/pi-ai";
 import { OAuthTokenProvider } from "../auth/oauth-token-provider.js";
+import { CUSTOM_PROVIDER_ID_ANTHROPIC, CUSTOM_PROVIDER_ID_OPENAI } from "./custom-provider.js";
 import { GeminiProviderClient } from "./providers/gemini-provider.js";
 import { OpenAIProviderClient } from "./providers/openai-provider.js";
+import { AnthropicProviderClient } from "./providers/anthropic-provider.js";
 import type { ChatInput, LlmProvider, LlmProviderName } from "./types.js";
 
 function toPiContext(messages: ChatInput[], provider: string, model: string): Context {
@@ -152,6 +154,25 @@ export class OpenAIApiKeyLlmClient implements LlmProvider {
   }
 }
 
+export class AnthropicApiKeyLlmClient implements LlmProvider {
+  private readonly inner: AnthropicProviderClient;
+
+  constructor(
+    options: { baseUrl: string; model: string; timeoutMs?: number; apiKey: string },
+    fetchImpl: typeof fetch = fetch,
+  ) {
+    this.inner = new AnthropicProviderClient(
+      options,
+      async () => ({ "x-api-key": options.apiKey }),
+      fetchImpl,
+    );
+  }
+
+  generateReply(messages: Parameters<LlmProvider["generateReply"]>[0]): ReturnType<LlmProvider["generateReply"]> {
+    return this.inner.generateReply(messages);
+  }
+}
+
 export class GeminiLlmClient implements LlmProvider {
   private readonly inner: GeminiProviderClient;
 
@@ -215,6 +236,14 @@ export function createLlmProvider(input: LlmProviderFactoryInput, fetchImpl: typ
 
   if (input.provider === "openai") {
     return new OpenAIApiKeyLlmClient(input, fetchImpl);
+  }
+
+  if (input.provider === CUSTOM_PROVIDER_ID_OPENAI) {
+    return new OpenAIApiKeyLlmClient(input, fetchImpl);
+  }
+
+  if (input.provider === CUSTOM_PROVIDER_ID_ANTHROPIC) {
+    return new AnthropicApiKeyLlmClient(input, fetchImpl);
   }
 
   return new PiAiLlmClient(input);

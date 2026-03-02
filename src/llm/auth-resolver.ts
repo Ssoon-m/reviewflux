@@ -11,6 +11,7 @@ function resolveApiKey(config: AppConfig, provider: LlmProviderName): string {
     `${normalized.replace(/[^a-z0-9]/g, "_").toUpperCase()}_API_KEY`,
     normalized === "google" || normalized === "google-gemini-cli" ? "GEMINI_API_KEY" : undefined,
     normalized === "openai" || normalized === "openai-codex" ? "OPENAI_API_KEY" : undefined,
+    normalized === "custom-openai" || normalized === "custom-anthropic" ? "CUSTOM_API_KEY" : undefined,
   ].filter(Boolean) as string[];
 
   for (const keyName of envCandidates) {

@@ -34,7 +34,7 @@ const schema = z
   })
   .transform((value) => {
     const provider = value.LLM_PROVIDER.trim().toLowerCase();
-    const defaultModel = provider.startsWith("google") || provider === "gemini" ? "gemini-2.5-flash" : "gpt-4o-mini";
+    const defaultModel = provider.startsWith("google") ? "gemini-2.5-flash" : "gpt-4o-mini";
 
     return {
       ...value,

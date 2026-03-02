@@ -144,7 +144,7 @@ describe("createLlmProvider", () => {
   it("creates gemini provider implementation", () => {
     const provider = createLlmProvider({
       authMode: "apikey",
-      provider: "gemini",
+      provider: "google",
       baseUrl: "https://generativelanguage.googleapis.com/v1beta",
       model: "gemini-2.5-flash",
       apiKey: "key-123",
@@ -181,7 +181,7 @@ describe("createLlmProvider", () => {
 
     const provider = createLlmProvider({
       authMode: "oauth",
-      provider: "gemini",
+      provider: "google-gemini-cli",
       baseUrl: "https://generativelanguage.googleapis.com/v1beta",
       model: "gemini-2.5-pro",
       tokenProvider,
@@ -197,8 +197,8 @@ describe("createLlmProvider", () => {
 
 describe("resolveModelRef", () => {
   it("resolves provider/model refs and aliases", () => {
-    expect(resolveModelRef({ raw: "gemini/gemini-2.5-flash", defaultProvider: "openai" })).toEqual({
-      provider: "gemini",
+    expect(resolveModelRef({ raw: "google/gemini-2.5-flash", defaultProvider: "openai" })).toEqual({
+      provider: "google",
       model: "gemini-2.5-flash",
     });
 
@@ -206,8 +206,8 @@ describe("resolveModelRef", () => {
       resolveModelRef({
         raw: "fast",
         defaultProvider: "openai",
-        aliases: { fast: { provider: "gemini", model: "gemini-2.5-flash" } },
+        aliases: { fast: { provider: "google", model: "gemini-2.5-flash" } },
       }),
-    ).toEqual({ provider: "gemini", model: "gemini-2.5-flash" });
+    ).toEqual({ provider: "google", model: "gemini-2.5-flash" });
   });
 });

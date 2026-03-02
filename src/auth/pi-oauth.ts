@@ -1,19 +1,10 @@
 import { getOAuthProvider, type OAuthCredentials, type OAuthLoginCallbacks } from "@mariozechner/pi-ai";
 import type { LlmProvider, OAuthConfig } from "../cli/config.js";
 
-type SupportedProvider = "openai-codex" | "google-gemini-cli";
-
-export function resolveOAuthProviderId(provider: LlmProvider): SupportedProvider {
-  const normalized = provider.trim().toLowerCase();
-
-  if (normalized === "gemini" || normalized === "google" || normalized === "google-gemini-cli") {
-    return "google-gemini-cli";
-  }
-
-  if (normalized === "codex" || normalized === "openai" || normalized === "openai-codex") {
-    return "openai-codex";
-  }
-
+/** Resolve to pi-ai OAuth provider id; only providers registered in pi-ai are valid. */
+export function resolveOAuthProviderId(provider: LlmProvider): string {
+  const id = provider.trim();
+  if (getOAuthProvider(id)) return id;
   throw new Error(`oauth_not_supported_for_provider:${provider}`);
 }
 

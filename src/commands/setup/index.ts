@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from "node:child_process";
-import { getModel, getModels, getProviders } from "@mariozechner/pi-ai";
+import { getModel, getModels, getOAuthProviders, getProviders } from "@mariozechner/pi-ai";
 import { promptPassword, promptSelect, promptText } from "../../cli/clack-prompter.js";
 import {
   ensureReviewFluxHome,
@@ -9,11 +9,14 @@ import {
   type ReviewFluxConfig,
 } from "../../cli/config.js";
 import { loginWithPiOAuth, resolveOAuthProviderId } from "../../auth/pi-oauth.js";
+import {
+  getCustomProviderId,
+  type CustomCompatibility,
+  validateCustomProviderConfig,
+} from "../../llm/custom-provider.js";
 import { getCodexEffortLevels } from "../../llm/reasoning-effort.js";
 
 type SetupOptions = { advanced: boolean };
-
-type OAuthCapableProvider = "openai-codex" | "google-gemini-cli";
 
 function parseSetupOptions(args: string[]): SetupOptions {
   return { advanced: args.includes("--advanced") };
@@ -25,23 +28,92 @@ function assertNonEmpty(value: string, field: string): string {
   return trimmed;
 }
 
-function getProviderChoices(): string[] {
-  return getProviders().slice().sort((a, b) => a.localeCompare(b));
+/** Provider label: OAuth providers use pi-ai’s .name; others use a short display hint. */
+function getProviderChoiceLabel(providerId: string): string {
+  const oauth = getOAuthProviders().find((p) => p.id === providerId);
+  if (oauth) return oauth.name;
+  if (providerId === "google") return "Google Gemini API key";
+  if (providerId === "openai") return "OpenAI API key";
+  return providerId;
 }
 
-function isOAuthCapableProvider(provider: string): provider is OAuthCapableProvider {
-  return provider === "openai-codex" || provider === "google-gemini-cli";
+/** OpenClaw-style labels and hints (aligned with openclaw auth-choice-options AUTH_CHOICE_GROUP_DEFS). */
+const GROUP_LABELS: Record<string, string> = {
+  google: "Google",
+  openai: "OpenAI",
+  anthropic: "Anthropic",
+  amazon: "Amazon (Bedrock)",
+  azure: "Azure",
+  mistral: "Mistral AI",
+  huggingface: "Hugging Face",
+  xai: "xAI (Grok)",
+  groq: "Groq",
+  openrouter: "OpenRouter",
+  github: "Copilot",
+  minimax: "MiniMax",
+  cerebras: "Cerebras",
+  vercel: "Vercel AI Gateway",
+  zai: "Z.AI",
+  opencode: "OpenCode Zen",
+  kimi: "Kimi",
+};
+
+const GROUP_HINTS: Partial<Record<string, string>> = {
+  google: "Gemini API key + OAuth",
+  openai: "Codex OAuth + API key",
+  anthropic: "setup-token + API key",
+  xai: "API key",
+  groq: "API key",
+  openrouter: "API key",
+  mistral: "API key",
+  huggingface: "Inference API (HF token)",
+  github: "GitHub + local proxy",
+  minimax: "M2.5 (recommended)",
+  opencode: "API key",
+  vercel: "API key",
+  zai: "GLM Coding Plan / Global / CN",
+};
+
+type ProviderGroup = { groupKey: string; groupLabel: string; providers: string[]; hint?: string };
+
+/** Build OpenClaw-style groups: same vendor → one first-level choice with auth hint, then "X auth method". */
+function getProviderGroups(): ProviderGroup[] {
+  const oauthIds = new Set(getOAuthProviders().map((p) => p.id));
+  const all = getProviders().slice().sort((a, b) => a.localeCompare(b));
+  const byGroup = new Map<string, string[]>();
+
+  for (const id of all) {
+    const key = id.includes("-") ? id.split("-")[0]! : id;
+    const list = byGroup.get(key) ?? [];
+    list.push(id);
+    byGroup.set(key, list);
+  }
+
+  return Array.from(byGroup.entries())
+    .map(([key, providers]) => {
+      const sorted = providers.sort((a, b) => a.localeCompare(b));
+      const hasOAuth = sorted.some((p) => oauthIds.has(p));
+      const hasApikey = sorted.some((p) => !oauthIds.has(p));
+      const derivedHint =
+        GROUP_HINTS[key] ??
+        (hasOAuth && hasApikey ? "API key + OAuth" : hasOAuth ? "OAuth" : "API key");
+      return {
+        groupKey: key,
+        groupLabel: GROUP_LABELS[key] ?? key.charAt(0).toUpperCase() + key.slice(1),
+        providers: sorted,
+        hint: derivedHint,
+      };
+    })
+    .sort((a, b) => a.groupLabel.localeCompare(b.groupLabel));
 }
 
+/** OAuth support comes from pi-ai’s OAuth provider registry only. */
+function isOAuthCapableProvider(provider: string): boolean {
+  return getOAuthProviders().some((p) => p.id === provider);
+}
+
+/** Use the chosen provider id as-is; pi-ai defines models and auth per provider. */
 function resolveApiProviderForSetup(params: { authMode: AuthMode; provider: LlmProvider }): string {
-  if (params.provider === "gemini") {
-    return params.authMode === "oauth" ? "google-gemini-cli" : "google";
-  }
-
-  if (params.provider === "openai") {
-    return params.authMode === "oauth" ? "openai-codex" : "openai";
-  }
-
   return params.provider;
 }
 
@@ -110,7 +182,7 @@ function openBrowser(url: string): boolean {
   return spawnDetached("xdg-open", [url]);
 }
 
-async function collectOAuthConfig(provider: OAuthCapableProvider): Promise<NonNullable<ReviewFluxConfig["oauth"]>> {
+async function collectOAuthConfig(provider: LlmProvider): Promise<NonNullable<ReviewFluxConfig["oauth"]>> {
   const oauthMode = await promptSelect<"browser" | "paste">({
     message: "OAuth setup method",
     options: [
@@ -188,35 +260,127 @@ function defaultBaseUrlForProvider(provider: string): string {
   return firstModel?.baseUrl ?? "https://api.openai.com/v1";
 }
 
+/** Orchestrates prompts for custom provider; validation is delegated to llm/custom-provider. */
+async function saveCustomProviderConfig(): Promise<void> {
+  const baseUrl = assertNonEmpty(
+    await promptText({ message: "Custom endpoint base URL", initialValue: "https://api.openai.com/v1" }),
+    "base_url",
+  );
+  const modelId = assertNonEmpty(
+    await promptText({ message: "Model ID", placeholder: "e.g. gpt-4o or claude-3-5-sonnet" }),
+    "model_id",
+  );
+  const compatibility = (await promptSelect<CustomCompatibility>({
+    message: "API compatibility",
+    options: [
+      { label: "OpenAI", value: "openai", hint: "OpenAI-style /v1/chat/completions" },
+      { label: "Anthropic", value: "anthropic", hint: "Anthropic Messages API" },
+    ],
+    initialValue: "openai",
+  })) as CustomCompatibility;
+  const key = assertNonEmpty(await promptPassword({ message: "API key", mask: "*" }), "api_key");
+
+  const validated = validateCustomProviderConfig({ baseUrl, modelId, compatibility, apiKey: key });
+  const provider = getCustomProviderId(validated.compatibility);
+  const profileId = `${provider}:default`;
+
+  const config: ReviewFluxConfig = {
+    appName: "reviewflux",
+    llm: provider,
+    authMode: "apikey",
+    llmApiBaseUrl: validated.baseUrl,
+    model: validated.modelId,
+    apiKey: { key: validated.apiKey ?? "" },
+    auth: {
+      profiles: {
+        [profileId]: {
+          provider,
+          mode: "apikey",
+          apiKey: { key: validated.apiKey ?? "" },
+        },
+      },
+      order: {
+        [provider]: [profileId],
+      },
+    },
+  };
+
+  const path = saveConfig(config);
+  console.log(`\n[reviewflux] setup complete: ${path}`);
+  console.log("Next: reviewflux daemon start");
+}
+
 async function runSetup(options: SetupOptions): Promise<void> {
   const home = ensureReviewFluxHome();
 
   console.log("[reviewflux] setup started");
   console.log(`[reviewflux] config directory: ${home}`);
 
-  const providerChoices = getProviderChoices();
-  if (providerChoices.length === 0) {
+  const groups = getProviderGroups();
+  if (groups.length === 0) {
     throw new Error("no_providers_from_pi_ai");
   }
 
-  const provider = await promptSelect<LlmProvider>({
-    message: "Select LLM provider",
-    options: providerChoices.map((p) => ({ label: p, value: p })),
-    initialValue: providerChoices.includes("openai-codex") ? "openai-codex" : providerChoices[0],
-  });
+  const SKIP_VALUE = "__skip__";
+  const BACK_VALUE = "__back__";
+  const CUSTOM_GROUP_VALUE = "__custom__";
 
-  const authModeOptions = isOAuthCapableProvider(provider)
-    ? [
-        { label: "OAuth", value: "oauth" as const },
-        { label: "API Key", value: "apikey" as const },
-      ]
-    : [{ label: "API Key", value: "apikey" as const }];
+  let provider: LlmProvider;
+  while (true) {
+    const selectedGroupKey = await promptSelect<string>({
+      message: "Model/auth provider",
+      options: [
+        { label: "Custom Provider", value: CUSTOM_GROUP_VALUE, hint: "Any OpenAI or Anthropic compatible endpoint" },
+        ...groups.map((g) => ({
+          label: g.groupLabel,
+          value: g.groupKey,
+          hint: g.hint,
+        })),
+        { label: "Skip for now", value: SKIP_VALUE },
+      ],
+      initialValue:
+        groups.find((g) => g.providers.includes("openai-codex"))?.groupKey ?? groups[0]!.groupKey,
+    });
 
-  const authMode = await promptSelect<AuthMode>({
-    message: "Select auth mode",
-    options: authModeOptions,
-    initialValue: authModeOptions.some((o) => o.value === "oauth") ? "oauth" : "apikey",
-  });
+    if (selectedGroupKey === SKIP_VALUE) {
+      console.log("[reviewflux] setup skipped. Run reviewflux setup again when ready.");
+      return;
+    }
+
+    if (selectedGroupKey === CUSTOM_GROUP_VALUE) {
+      await saveCustomProviderConfig();
+      return;
+    }
+
+    const selectedGroup = groups.find((g) => g.groupKey === selectedGroupKey)!;
+
+    if (selectedGroup.providers.length === 1) {
+      provider = selectedGroup.providers[0]!;
+      break;
+    }
+
+    const methodSelection = await promptSelect<string>({
+      message: `${selectedGroup.groupLabel} auth method`,
+      options: [
+        ...selectedGroup.providers.map((p) => ({
+          label: getProviderChoiceLabel(p),
+          value: p,
+        })),
+        { label: "Back", value: BACK_VALUE },
+      ],
+      initialValue:
+        selectedGroup.providers.find((p) => p === "openai-codex" || p === "google-gemini-cli") ??
+        selectedGroup.providers[0]!,
+    });
+
+    if (methodSelection === BACK_VALUE) {
+      continue;
+    }
+    provider = methodSelection as LlmProvider;
+    break;
+  }
+
+  const authMode: AuthMode = isOAuthCapableProvider(provider) ? "oauth" : "apikey";
 
   const defaultBaseUrl = defaultBaseUrlForProvider(resolveApiProviderForSetup({ authMode, provider }));
   let llmApiBaseUrl = defaultBaseUrl;
