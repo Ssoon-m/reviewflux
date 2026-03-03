@@ -134,4 +134,28 @@ describe("cli-config", () => {
     expect(authRaw.oauth?.accessToken).toBe("legacy-token");
     expect(authRaw.profiles?.["openai-codex:default"]).toBeDefined();
   });
+
+  it("preserves auth order even when auth store has no profiles", () => {
+    const fakeHome = mkdtempSync(join(tmpdir(), "reviewflux-home-"));
+
+    const config: ReviewFluxConfig = {
+      appName: "reviewflux",
+      llm: "google",
+      authMode: "oauth",
+      llmApiBaseUrl: "https://generativelanguage.googleapis.com/v1beta",
+      model: "gemini-2.5-pro",
+      oauth: { accessToken: "legacy-token" },
+      auth: {
+        order: {
+          google: ["google:default"],
+        },
+      },
+    };
+
+    saveConfig(config, fakeHome);
+    const loaded = loadConfig(fakeHome);
+
+    expect(loaded.auth?.order?.google).toEqual(["google:default"]);
+    expect(loaded.auth?.profiles).toEqual({});
+  });
 });

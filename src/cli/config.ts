@@ -128,8 +128,8 @@ export function saveConfig(config: ReviewFluxConfig, home: string = homedir()): 
 
   const { auth, oauth, apiKey, ...configWithoutSecrets } = config;
 
-  writeConfigFile(path, configWithoutSecrets);
   writeAuthStoreFile({ authPath, auth, oauth, apiKey });
+  writeConfigFile(path, configWithoutSecrets);
 
   return path;
 }
@@ -144,17 +144,18 @@ function readAuthStore(
   const parsed = JSON.parse(raw) as Partial<AuthStoreFile>;
 
   const profiles = parsed.profiles && typeof parsed.profiles === "object" ? parsed.profiles : undefined;
+  const order = parsed.order && typeof parsed.order === "object" ? parsed.order : undefined;
   const oauth = parsed.oauth && typeof parsed.oauth === "object" ? parsed.oauth : undefined;
   const apiKey = parsed.apiKey && typeof parsed.apiKey === "object" ? parsed.apiKey : undefined;
 
-  if (!profiles && !oauth && !apiKey) return undefined;
+  if (!profiles && !order && !oauth && !apiKey) return undefined;
 
   return {
-    ...(profiles
+    ...(profiles || order
       ? {
           auth: {
-            profiles,
-            ...(parsed.order && typeof parsed.order === "object" ? { order: parsed.order } : {}),
+            profiles: profiles ?? {},
+            ...(order ? { order } : {}),
           },
         }
       : {}),
