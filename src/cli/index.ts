@@ -24,6 +24,7 @@ async function main() {
 
   if (cmd === "setup") {
     await runSetupCommand(args.slice(1));
+    process.exit(0);
     return;
   }
 

@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from "node:child_process";
-import { getModel, getModels, getOAuthProviders, getProviders } from "@mariozechner/pi-ai";
+import { getModel, getModels, getOAuthProvider, getOAuthProviders, getProviders } from "@mariozechner/pi-ai";
 import { promptPassword, promptSelect, promptText } from "../../cli/clack-prompter.js";
 import {
   ensureReviewFluxHome,
@@ -30,11 +30,19 @@ function assertNonEmpty(value: string, field: string): string {
 
 /** Provider label: OAuth providers use pi-ai’s .name; others use a short display hint. */
 function getProviderChoiceLabel(providerId: string): string {
+  if (providerId === "google") return "Google Gemini API key";
+  if (providerId === "google-gemini-cli") return "Google Gemini CLI OAuth";
   const oauth = getOAuthProviders().find((p) => p.id === providerId);
   if (oauth) return oauth.name;
-  if (providerId === "google") return "Google Gemini API key";
   if (providerId === "openai") return "OpenAI API key";
   return providerId;
+}
+
+function getProviderChoiceHint(providerId: string): string | undefined {
+  if (providerId === "google-gemini-cli") {
+    return "Unofficial flow; review account-risk warning before use";
+  }
+  return undefined;
 }
 
 /** OpenClaw-style labels and hints (aligned with openclaw auth-choice-options AUTH_CHOICE_GROUP_DEFS). */
@@ -79,7 +87,11 @@ type ProviderGroup = { groupKey: string; groupLabel: string; providers: string[]
 /** Build OpenClaw-style groups: same vendor → one first-level choice with auth hint, then "X auth method". */
 function getProviderGroups(): ProviderGroup[] {
   const oauthIds = new Set(getOAuthProviders().map((p) => p.id));
-  const all = getProviders().slice().sort((a, b) => a.localeCompare(b));
+  const excludedInSetup = new Set(["google-antigravity", "google-vertex"]);
+  const all = getProviders()
+    .filter((id) => !excludedInSetup.has(id))
+    .slice()
+    .sort((a, b) => a.localeCompare(b));
   const byGroup = new Map<string, string[]>();
 
   for (const id of all) {
@@ -182,6 +194,33 @@ function openBrowser(url: string): boolean {
   return spawnDetached("xdg-open", [url]);
 }
 
+function releaseInteractiveInput(): void {
+  if (!process.stdin.isTTY) return;
+  process.stdin.setRawMode?.(false);
+  process.stdin.pause();
+}
+
+function extractDeviceCode(instructions: string | undefined): string | undefined {
+  if (!instructions) return undefined;
+  const match = instructions.match(/enter\s+code\s*:\s*(.+)$/i);
+  const code = match?.[1]?.trim();
+  return code && code.length > 0 ? code : undefined;
+}
+
+function manualOAuthPromptForProvider(provider: LlmProvider): { message: string; placeholder: string } {
+  if (provider === "openai-codex") {
+    return {
+      message: "Paste OpenAI redirect URL or authorization code",
+      placeholder: "http://localhost:1455/auth/callback?code=...&state=...",
+    };
+  }
+
+  return {
+    message: "Paste authorization code",
+    placeholder: "XXXX-XXXX",
+  };
+}
+
 async function collectOAuthConfig(provider: LlmProvider): Promise<NonNullable<ReviewFluxConfig["oauth"]>> {
   const oauthMode = await promptSelect<"browser" | "paste">({
     message: "OAuth setup method",
@@ -214,11 +253,30 @@ async function collectOAuthConfig(provider: LlmProvider): Promise<NonNullable<Re
     };
   }
 
-  return loginWithPiOAuth(provider, {
-    onAuth: ({ url }) => {
-      console.log("\n[reviewflux] OAuth URL ready");
-      console.log("Open this URL in your LOCAL browser:");
-      console.log(`${url}\n`);
+  const isGitHubCopilot = provider === "github-copilot";
+  const usesCallbackServer = getOAuthProvider(provider)?.usesCallbackServer === true;
+
+  const callbacks: Parameters<typeof loginWithPiOAuth>[1] = {
+    onAuth: ({ url, instructions }) => {
+      console.log("\n[reviewflux] OAuth authorization required");
+      if (isGitHubCopilot) {
+        console.log("GitHub Copilot device login");
+        console.log(`Verification URL: ${url}`);
+        const code = extractDeviceCode(instructions);
+        if (code) {
+          console.log(`Enter code: ${code}`);
+        }
+      } else {
+        console.log("Open this URL in your LOCAL browser:");
+        console.log(`${url}`);
+      }
+      if (instructions?.trim()) {
+        console.log(`\n${instructions.trim()}`);
+      }
+      if (usesCallbackServer && !isGitHubCopilot) {
+        console.log("[reviewflux] waiting for browser callback. If needed, paste redirect URL in terminal.");
+      }
+      console.log("");
 
       const opened = openBrowser(url);
       if (opened) {
@@ -228,8 +286,16 @@ async function collectOAuthConfig(provider: LlmProvider): Promise<NonNullable<Re
       }
     },
     onPrompt: async (prompt) => {
+      if (isGitHubCopilot && prompt.message.includes("GitHub Enterprise URL/domain")) {
+        console.log("[reviewflux] Using github.com (press setup again for enterprise if needed).");
+        return "";
+      }
+
+      const anthropicCodePlaceholder =
+        provider === "anthropic" && /authorization code/i.test(prompt.message) ? "code#state" : prompt.placeholder;
+
       while (true) {
-        const value = await promptText({ message: prompt.message, initialValue: prompt.placeholder ?? "" });
+        const value = await promptText({ message: prompt.message, initialValue: anthropicCodePlaceholder ?? "" });
         if (value.trim().length > 0 || prompt.allowEmpty) return value;
         console.log("[reviewflux] OAuth input is required.");
       }
@@ -237,7 +303,22 @@ async function collectOAuthConfig(provider: LlmProvider): Promise<NonNullable<Re
     onProgress: (message) => {
       if (message?.trim()) console.log(`[reviewflux] ${message}`);
     },
-  });
+  };
+
+  if (provider === "openai-codex") {
+    callbacks.onManualCodeInput = async () => {
+      const manualPrompt = manualOAuthPromptForProvider(provider);
+      return assertNonEmpty(
+        await promptText({
+          message: manualPrompt.message,
+          placeholder: manualPrompt.placeholder,
+        }),
+        "oauth_manual_code",
+      );
+    };
+  }
+
+  return loginWithPiOAuth(provider, callbacks);
 }
 
 async function pickCodexEffort(params: {
@@ -308,6 +389,7 @@ async function saveCustomProviderConfig(): Promise<void> {
   const path = saveConfig(config);
   console.log(`\n[reviewflux] setup complete: ${path}`);
   console.log("Next: reviewflux daemon start");
+  releaseInteractiveInput();
 }
 
 async function runSetup(options: SetupOptions): Promise<void> {
@@ -344,6 +426,7 @@ async function runSetup(options: SetupOptions): Promise<void> {
 
     if (selectedGroupKey === SKIP_VALUE) {
       console.log("[reviewflux] setup skipped. Run reviewflux setup again when ready.");
+      releaseInteractiveInput();
       return;
     }
 
@@ -365,6 +448,7 @@ async function runSetup(options: SetupOptions): Promise<void> {
         ...selectedGroup.providers.map((p) => ({
           label: getProviderChoiceLabel(p),
           value: p,
+          hint: getProviderChoiceHint(p),
         })),
         { label: "Back", value: BACK_VALUE },
       ],
@@ -430,6 +514,7 @@ async function runSetup(options: SetupOptions): Promise<void> {
     const path = saveConfig(config);
     console.log(`\n[reviewflux] setup complete: ${path}`);
     console.log("Next: reviewflux daemon start");
+    releaseInteractiveInput();
     return;
   }
 
@@ -472,6 +557,7 @@ async function runSetup(options: SetupOptions): Promise<void> {
   const path = saveConfig(config);
   console.log(`\n[reviewflux] setup complete: ${path}`);
   console.log("Next: reviewflux daemon start");
+  releaseInteractiveInput();
 }
 
 export async function runSetupCommand(args: string[]): Promise<void> {
