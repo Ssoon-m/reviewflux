@@ -2,6 +2,19 @@ import { promptSelect, promptText } from "../../cli/clack-prompter.js";
 import { loadConfig, saveConfig, type ReviewFluxConfig } from "../../cli/config.js";
 import { normalizeRepoInput, type PrReviewMode } from "./shared.js";
 import { existsSync, statSync } from "node:fs";
+import { dirname } from "node:path";
+
+function resolveWorkspaceDir(input: string): string {
+  const trimmed = input.trim();
+  if (!trimmed) throw new Error("workspace_dir_required");
+  if (!existsSync(trimmed)) throw new Error(`workspace_dir_not_found:${trimmed}`);
+
+  const stat = statSync(trimmed);
+  if (stat.isDirectory()) return trimmed;
+  if (stat.isFile()) return dirname(trimmed);
+
+  throw new Error(`workspace_dir_not_found:${trimmed}`);
+}
 
 function upsertRepoPolicy(config: ReviewFluxConfig, repo: string, modelAlias?: string): void {
   const nextPolicies = { ...(config.repoModelPolicies ?? {}) };
@@ -50,14 +63,12 @@ export async function runProjectAddCommand(): Promise<void> {
     initialValue: "opened_once",
   })) as PrReviewMode;
 
-  const workspaceDir = (await promptText({
-    message: "Local repository path for markdown context",
+  const workspacePathInput = await promptText({
+    message: "Local repository path (directory or AGENTS.md path)",
     initialValue: process.cwd(),
-    placeholder: "/Users/you/dev/repo",
-  })).trim();
-  if (!existsSync(workspaceDir) || !statSync(workspaceDir).isDirectory()) {
-    throw new Error(`workspace_dir_not_found:${workspaceDir}`);
-  }
+    placeholder: "/Users/you/dev/repo or /Users/you/dev/repo/AGENTS.md",
+  });
+  const workspaceDir = resolveWorkspaceDir(workspacePathInput);
 
   const contextMode = await promptSelect<"default" | "custom">({
     message: "Review context files",
