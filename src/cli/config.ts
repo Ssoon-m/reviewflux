@@ -48,6 +48,22 @@ export type ReviewFluxConfig = {
   models?: string[];
   modelAliases?: Record<string, { provider: LlmProvider; model: string }>;
   repoModelPolicies?: Record<string, { defaultAlias?: string; taskAliases?: Record<string, string> }>;
+  projects?: Record<
+    string,
+    {
+      repo: string;
+      workspaceDir: string;
+      modelAlias?: string;
+      pr: {
+        mode: "opened_once" | "on_push";
+        forceCommand: "@reviewflux";
+      };
+      context?: {
+        mode: "default" | "custom";
+        include?: string[];
+      };
+    }
+  >;
   effort?: EffortLevel;
   // Legacy single-auth fields (kept for backwards compatibility)
   oauth?: OAuthConfig;
@@ -66,6 +82,7 @@ type AuthStoreFile = {
   oauth?: ReviewFluxConfig["oauth"];
   apiKey?: ReviewFluxConfig["apiKey"];
 };
+
 
 export function getReviewFluxHome(home: string = homedir()): string {
   return join(home, ".reviewflux");
