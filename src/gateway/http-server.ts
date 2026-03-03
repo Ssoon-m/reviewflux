@@ -4,6 +4,8 @@ import { fileURLToPath } from "node:url";
 import { realpathSync } from "node:fs";
 import { resolve } from "node:path";
 import { readConfig } from "../config/env.js";
+import { loadConfig } from "../cli/config.js";
+import { decidePrReview } from "./pr-event-policy.js";
 import { createLlmService } from "../llm/service.js";
 
 export function parsePromptText(input: unknown): string | null {
@@ -41,6 +43,37 @@ export function createApp() {
     } catch (error) {
       // eslint-disable-next-line no-console
       console.error("/v1/ask failed", error);
+      res.status(500).json({ error: getClientErrorCode(error) });
+    }
+  });
+
+  app.post("/v1/github/events", (req, res) => {
+    try {
+      const eventName = req.body?.eventName;
+      const repo = req.body?.repo;
+
+      if (
+        (eventName !== "pull_request" &&
+          eventName !== "issue_comment" &&
+          eventName !== "pull_request_review_comment") ||
+        typeof repo !== "string" ||
+        repo.trim().length === 0
+      ) {
+        return res.status(400).json({ error: "invalid_event_payload" });
+      }
+
+      const config = loadConfig();
+      const decision = decidePrReview(config, {
+        eventName,
+        repo,
+        action: typeof req.body?.action === "string" ? req.body.action : undefined,
+        commentBody: typeof req.body?.commentBody === "string" ? req.body.commentBody : undefined,
+      });
+
+      res.json(decision);
+    } catch (error) {
+      // eslint-disable-next-line no-console
+      console.error("/v1/github/events failed", error);
       res.status(500).json({ error: getClientErrorCode(error) });
     }
   });
