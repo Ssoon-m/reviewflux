@@ -1,15 +1,27 @@
 import { execFile } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { getModel } from "@mariozechner/pi-ai";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as wait } from "node:timers/promises";
-import { loadConfig, type ReviewFluxConfig } from "../../cli/config.js";
+import { apiKeyFromPiOAuth, refreshWithPiOAuth } from "../../auth/pi-oauth.js";
+import { getActiveAuthProfile, loadConfig, saveConfig, type ReviewFluxConfig } from "../../cli/config.js";
+import { createLlmProvider } from "../../llm/factory.js";
 import { normalizeRepoKey } from "../../llm/model-routing.js";
 import { buildProjectContextText } from "../../llm/project-context.js";
 
 type PullRequestSummary = {
   number: number;
+  title: string;
+  body?: string;
   head: { sha: string };
+};
+
+type PullRequestDetail = {
+  number: number;
+  title: string;
+  body?: string;
+  html_url: string;
 };
 
 type IssueComment = {
@@ -56,6 +68,7 @@ type ReviewTriggerReason = "opened_once" | "on_push" | "manual_force";
 
 const FORCE_COMMAND = "@reviewflux";
 const POLL_INTERVAL_MS = Number(process.env.REVIEWFLUX_POLL_INTERVAL_MS ?? "30000");
+const MAX_DIFF_CHARS = 18000;
 
 function daemonStatePath(home: string = homedir()): string {
   return join(home, ".reviewflux", "daemon-state.json");
@@ -92,7 +105,7 @@ function parseOwnerRepo(repo: string): { owner: string; name: string } {
 
 function ghExec(args: string[]): Promise<string> {
   return new Promise((resolve, reject) => {
-    execFile("gh", args, { encoding: "utf8" }, (error, stdout, stderr) => {
+    execFile("gh", args, { encoding: "utf8", maxBuffer: 4 * 1024 * 1024 }, (error, stdout, stderr) => {
       if (error) {
         reject(new Error(stderr.trim() || error.message));
         return;
@@ -152,48 +165,177 @@ function shouldReviewOnPrAction(project: ProjectConfig, action: string): boolean
   return action === "opened" || action === "synchronize";
 }
 
-function buildReviewSystemPrompt(params: {
-  repo: string;
-  prNumber: number;
-  reason: ReviewTriggerReason;
-  projectContext: string;
-}): string {
+function resolveReasonForPrAction(project: ProjectConfig, action: "opened" | "synchronize"): ReviewTriggerReason {
+  if (action === "opened" && project.pr.mode === "opened_once") return "opened_once";
+  return "on_push";
+}
+
+function resolveProjectModel(config: ReviewFluxConfig, project: ProjectConfig): { provider: string; model: string } {
+  const alias = project.modelAlias;
+  if (alias && config.modelAliases?.[alias]) {
+    return {
+      provider: config.modelAliases[alias].provider,
+      model: config.modelAliases[alias].model,
+    };
+  }
+
+  const selectedModel = config.model || config.models?.[0];
+  if (!selectedModel) throw new Error("model_not_configured");
+
+  if (selectedModel.includes("/")) {
+    const [provider, ...rest] = selectedModel.split("/");
+    if (provider && rest.length > 0) {
+      return { provider, model: rest.join("/") };
+    }
+  }
+
+  return { provider: config.llm, model: selectedModel };
+}
+
+async function resolveApiKeyForProvider(config: ReviewFluxConfig, provider: string): Promise<string> {
+  const profile = getActiveAuthProfile(config, provider);
+
+  if (profile?.mode === "apikey") {
+    const key = profile.apiKey.key.trim();
+    if (!key) throw new Error(`api_key_missing_for_provider:${provider}`);
+    return key;
+  }
+
+  if (profile?.mode === "oauth") {
+    const oauth = profile.oauth;
+    if (oauth.expiresAtEpochMs && oauth.refreshToken && Date.now() >= oauth.expiresAtEpochMs - 10_000) {
+      const refreshed = await refreshWithPiOAuth(provider, oauth);
+      Object.assign(oauth, refreshed);
+      saveConfig(config);
+    }
+    return apiKeyFromPiOAuth(provider, oauth);
+  }
+
+  if (provider === config.llm) {
+    if (config.authMode === "apikey" && config.apiKey?.key?.trim()) {
+      return config.apiKey.key.trim();
+    }
+    if (config.authMode === "oauth" && config.oauth?.accessToken) {
+      if (config.oauth.expiresAtEpochMs && config.oauth.refreshToken && Date.now() >= config.oauth.expiresAtEpochMs - 10_000) {
+        const refreshed = await refreshWithPiOAuth(provider, config.oauth);
+        Object.assign(config.oauth, refreshed);
+        saveConfig(config);
+      }
+      return apiKeyFromPiOAuth(provider, config.oauth);
+    }
+  }
+
+  throw new Error(`credentials_not_found_for_provider:${provider}`);
+}
+
+function truncate(text: string, max: number): string {
+  if (text.length <= max) return text;
+  return `${text.slice(0, max)}\n\n...[truncated]`;
+}
+
+function buildReviewSystemPrompt(params: { repo: string; prNumber: number; reason: ReviewTriggerReason; projectContext: string }): string {
   return [
     "You are ReviewFlux, a pull request review assistant.",
+    "Provide concise, actionable review comments focused on correctness, risk, and maintainability.",
     `Repository: ${params.repo}`,
     `Pull Request: #${params.prNumber}`,
     `Trigger reason: ${params.reason}`,
-    ...(params.projectContext
-      ? ["", "Project markdown context:", params.projectContext]
-      : []),
+    ...(params.projectContext ? ["", "Project markdown context:", params.projectContext] : []),
   ].join("\n");
 }
 
-function emitReviewTrigger(params: {
+function buildReviewUserPrompt(params: { pr: PullRequestDetail; diff: string }): string {
+  return [
+    `PR title: ${params.pr.title}`,
+    `PR URL: ${params.pr.html_url}`,
+    "",
+    "PR description:",
+    params.pr.body?.trim() || "(empty)",
+    "",
+    "Unified diff:",
+    truncate(params.diff, MAX_DIFF_CHARS),
+    "",
+    "Task: write a PR review comment with critical findings first. If no blocking issues, explicitly say looks good and list minor suggestions.",
+  ].join("\n");
+}
+
+async function createReviewComment(params: {
+  config: ReviewFluxConfig;
+  project: ProjectConfig;
   repo: string;
   prNumber: number;
   reason: ReviewTriggerReason;
   projectContext: string;
-}): void {
-  const systemPrompt = buildReviewSystemPrompt({
+}): Promise<string> {
+  const { provider, model } = resolveProjectModel(params.config, params.project);
+  const apiKey = await resolveApiKeyForProvider(params.config, provider);
+
+  const pr = await ghApiJson<PullRequestDetail>(`repos/${parseOwnerRepo(params.repo).owner}/${parseOwnerRepo(params.repo).name}/pulls/${params.prNumber}`);
+  if (pr.number !== params.prNumber) {
+    throw new Error(`pr_mismatch:${params.repo}#${params.prNumber}`);
+  }
+
+  const diff = await ghExec(["pr", "diff", String(params.prNumber), "-R", params.repo]);
+
+  const fallbackModel = getModel(provider as never, model as never);
+  const baseUrl = provider === params.config.llm ? params.config.llmApiBaseUrl.replace(/\/$/, "") : (fallbackModel?.baseUrl ?? params.config.llmApiBaseUrl.replace(/\/$/, ""));
+  const client = createLlmProvider({
+    authMode: "apikey",
+    provider: provider as never,
+    baseUrl,
+    model,
+    apiKey,
+  });
+
+  return client.generateReply([
+    {
+      role: "system",
+      content: buildReviewSystemPrompt({
+        repo: params.repo,
+        prNumber: params.prNumber,
+        reason: params.reason,
+        projectContext: params.projectContext,
+      }),
+    },
+    {
+      role: "user",
+      content: buildReviewUserPrompt({ pr, diff }),
+    },
+  ]);
+}
+
+async function postReviewComment(repo: string, prNumber: number, body: string): Promise<void> {
+  await ghExec(["pr", "comment", String(prNumber), "-R", repo, "--body", body]);
+}
+
+async function triggerReview(params: {
+  config: ReviewFluxConfig;
+  project: ProjectConfig;
+  repo: string;
+  prNumber: number;
+  reason: ReviewTriggerReason;
+}): Promise<void> {
+  const projectContext = buildProjectContextText({
+    workspaceDir: params.project.workspaceDir,
+    context: params.project.context,
+  });
+
+  const comment = await createReviewComment({
+    config: params.config,
+    project: params.project,
     repo: params.repo,
     prNumber: params.prNumber,
     reason: params.reason,
-    projectContext: params.projectContext,
+    projectContext,
   });
 
-  console.log(`[reviewflux] review trigger: ${params.repo}#${params.prNumber} reason=${params.reason}`);
-  console.log(`[reviewflux] system prompt prepared (${systemPrompt.length} chars)`);
+  await postReviewComment(params.repo, params.prNumber, comment);
+  console.log(`[reviewflux] review posted: ${params.repo}#${params.prNumber} reason=${params.reason}`);
 }
 
 async function pollProject(config: ReviewFluxConfig, state: DaemonState, repo: string): Promise<void> {
-  const project = config.projects?.[normalizeRepoKey(repo)];
+  const project = config.projects?.[normalizeRepoKey(repo)] as ProjectConfig | undefined;
   if (!project) return;
-
-  const projectContext = buildProjectContextText({
-    workspaceDir: project.workspaceDir,
-    context: project.context,
-  });
 
   const { owner, name } = parseOwnerRepo(repo);
   const projectState = buildProjectState(state, repo);
@@ -208,7 +350,13 @@ async function pollProject(config: ReviewFluxConfig, state: DaemonState, repo: s
 
     if (!prevSha) {
       if (shouldReviewOnPrAction(project, "opened")) {
-        emitReviewTrigger({ repo, prNumber: pr.number, reason: "opened_once", projectContext });
+        await triggerReview({
+          config,
+          project,
+          repo,
+          prNumber: pr.number,
+          reason: resolveReasonForPrAction(project, "opened"),
+        });
       }
       projectState.prHeads[prNum] = pr.head.sha;
       continue;
@@ -216,7 +364,13 @@ async function pollProject(config: ReviewFluxConfig, state: DaemonState, repo: s
 
     if (prevSha !== pr.head.sha) {
       if (shouldReviewOnPrAction(project, "synchronize")) {
-        emitReviewTrigger({ repo, prNumber: pr.number, reason: "on_push", projectContext });
+        await triggerReview({
+          config,
+          project,
+          repo,
+          prNumber: pr.number,
+          reason: resolveReasonForPrAction(project, "synchronize"),
+        });
       }
       projectState.prHeads[prNum] = pr.head.sha;
     }
@@ -240,7 +394,13 @@ async function pollProject(config: ReviewFluxConfig, state: DaemonState, repo: s
     const issue = await ghApiJson<IssueInfo>(`repos/${owner}/${name}/issues/${issueNumber}`);
     if (!issue.pull_request) continue;
 
-    emitReviewTrigger({ repo, prNumber: issue.number, reason: "manual_force", projectContext });
+    await triggerReview({
+      config,
+      project,
+      repo,
+      prNumber: issue.number,
+      reason: "manual_force",
+    });
     trackSeenCommentId(projectState, seenId);
   }
 
@@ -253,7 +413,13 @@ async function pollProject(config: ReviewFluxConfig, state: DaemonState, repo: s
     const prNumber = parsePrNumberFromPullUrl(comment.pull_request_url);
     if (!prNumber) continue;
 
-    emitReviewTrigger({ repo, prNumber, reason: "manual_force", projectContext });
+    await triggerReview({
+      config,
+      project,
+      repo,
+      prNumber,
+      reason: "manual_force",
+    });
     trackSeenCommentId(projectState, seenId);
   }
 }
@@ -280,10 +446,7 @@ export async function runDaemonStartCommand(): Promise<void> {
   console.log(`[reviewflux] tracking ${projects.length} project(s)`);
   for (const project of projects) {
     const modelAlias = project.modelAlias ?? "<default>";
-    const contextInfo =
-      project.context?.mode === "custom"
-        ? `custom:${(project.context.include ?? []).join(",")}`
-        : "default:AGENTS.md";
+    const contextInfo = project.context?.mode === "custom" ? `custom:${(project.context.include ?? []).join(",")}` : "default:AGENTS.md";
     console.log(`- ${project.repo} | mode=${project.pr.mode} | model=${modelAlias} | context=${contextInfo}`);
   }
   console.log(`[reviewflux] force command is always enabled: ${FORCE_COMMAND}`);
