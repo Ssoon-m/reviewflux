@@ -1,8 +1,16 @@
-import { mkdtempSync, statSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { getActiveAuthProfile, getConfigPath, saveConfig, loadConfig, type ReviewFluxConfig } from "../src/cli/config.js";
+import {
+  getActiveAuthProfile,
+  ensureReviewFluxHome,
+  getAuthStorePath,
+  getConfigPath,
+  loadConfig,
+  saveConfig,
+  type ReviewFluxConfig,
+} from "../src/cli/config.js";
 
 describe("cli-config", () => {
   it("saves and loads config under ~/.reviewflux", () => {
@@ -32,9 +40,25 @@ describe("cli-config", () => {
 
     const path = saveConfig(config, fakeHome);
     expect(path).toBe(getConfigPath(fakeHome));
+    expect(existsSync(getAuthStorePath(fakeHome))).toBe(true);
 
     const mode = statSync(path).mode & 0o777;
     expect(mode).toBe(0o600);
+
+    const authMode = statSync(getAuthStorePath(fakeHome)).mode & 0o777;
+    expect(authMode).toBe(0o600);
+
+    const savedConfigRaw = JSON.parse(readFileSync(path, "utf8")) as ReviewFluxConfig;
+    expect(savedConfigRaw.auth).toBeUndefined();
+    expect(savedConfigRaw.oauth).toBeUndefined();
+    expect(savedConfigRaw.apiKey).toBeUndefined();
+
+    const savedAuthRaw = JSON.parse(readFileSync(getAuthStorePath(fakeHome), "utf8")) as {
+      oauth?: { accessToken?: string };
+      profiles?: Record<string, unknown>;
+    };
+    expect(savedAuthRaw.oauth?.accessToken).toBe("token");
+    expect(Object.keys(savedAuthRaw.profiles ?? {}).length).toBeGreaterThan(0);
 
     const loaded = loadConfig(fakeHome);
     expect(loaded).toEqual(config);
@@ -69,5 +93,69 @@ describe("cli-config", () => {
 
     const profile = getActiveAuthProfile(config, "google");
     expect(profile?.mode).toBe("oauth");
+  });
+
+  it("migrates inline secrets from config.json into auth.json", () => {
+    const fakeHome = mkdtempSync(join(tmpdir(), "reviewflux-home-"));
+    ensureReviewFluxHome(fakeHome);
+
+    const legacyConfig: ReviewFluxConfig = {
+      appName: "reviewflux",
+      llm: "openai-codex",
+      authMode: "oauth",
+      llmApiBaseUrl: "https://api.openai.com/v1",
+      model: "gpt-5-codex",
+      oauth: { accessToken: "legacy-token" },
+      auth: {
+        profiles: {
+          "openai-codex:default": {
+            provider: "openai-codex",
+            mode: "oauth",
+            oauth: { accessToken: "legacy-token" },
+          },
+        },
+      },
+    };
+
+    writeFileSync(getConfigPath(fakeHome), `${JSON.stringify(legacyConfig, null, 2)}\n`, "utf8");
+
+    const loaded = loadConfig(fakeHome);
+    expect(loaded.oauth?.accessToken).toBe("legacy-token");
+    expect(loaded.auth?.profiles?.["openai-codex:default"]).toBeDefined();
+
+    const migratedConfigRaw = JSON.parse(readFileSync(getConfigPath(fakeHome), "utf8")) as ReviewFluxConfig;
+    expect(migratedConfigRaw.oauth).toBeUndefined();
+    expect(migratedConfigRaw.auth).toBeUndefined();
+
+    const authRaw = JSON.parse(readFileSync(getAuthStorePath(fakeHome), "utf8")) as {
+      oauth?: { accessToken?: string };
+      profiles?: Record<string, unknown>;
+    };
+    expect(authRaw.oauth?.accessToken).toBe("legacy-token");
+    expect(authRaw.profiles?.["openai-codex:default"]).toBeDefined();
+  });
+
+  it("preserves auth order even when auth store has no profiles", () => {
+    const fakeHome = mkdtempSync(join(tmpdir(), "reviewflux-home-"));
+
+    const config: ReviewFluxConfig = {
+      appName: "reviewflux",
+      llm: "google",
+      authMode: "oauth",
+      llmApiBaseUrl: "https://generativelanguage.googleapis.com/v1beta",
+      model: "gemini-2.5-pro",
+      oauth: { accessToken: "legacy-token" },
+      auth: {
+        order: {
+          google: ["google:default"],
+        },
+      },
+    };
+
+    saveConfig(config, fakeHome);
+    const loaded = loadConfig(fakeHome);
+
+    expect(loaded.auth?.order?.google).toEqual(["google:default"]);
+    expect(loaded.auth?.profiles).toEqual({});
   });
 });
