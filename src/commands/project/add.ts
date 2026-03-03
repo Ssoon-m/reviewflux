@@ -2,7 +2,6 @@ import { promptSelect, promptText } from "../../cli/clack-prompter.js";
 import { loadConfig, saveConfig, type ReviewFluxConfig } from "../../cli/config.js";
 import { normalizeRepoInput, type PrReviewMode } from "./shared.js";
 import { existsSync, statSync } from "node:fs";
-import { dirname } from "node:path";
 
 function resolveWorkspaceDir(input: string): string {
   const trimmed = input.trim();
@@ -11,7 +10,6 @@ function resolveWorkspaceDir(input: string): string {
 
   const stat = statSync(trimmed);
   if (stat.isDirectory()) return trimmed;
-  if (stat.isFile()) return dirname(trimmed);
 
   throw new Error(`workspace_dir_not_found:${trimmed}`);
 }
@@ -64,9 +62,9 @@ export async function runProjectAddCommand(): Promise<void> {
   })) as PrReviewMode;
 
   const workspacePathInput = await promptText({
-    message: "Local repository path (directory or AGENTS.md path)",
+    message: "Local repository directory path",
     initialValue: process.cwd(),
-    placeholder: "/Users/you/dev/repo or /Users/you/dev/repo/AGENTS.md",
+    placeholder: "/Users/you/dev/repo",
   });
   const workspaceDir = resolveWorkspaceDir(workspacePathInput);
 
