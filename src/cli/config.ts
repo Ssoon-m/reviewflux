@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -59,12 +59,24 @@ export type ReviewFluxConfig = {
   };
 };
 
+type AuthStoreFile = {
+  version: 1;
+  profiles?: NonNullable<NonNullable<ReviewFluxConfig["auth"]>["profiles"]>;
+  order?: NonNullable<NonNullable<ReviewFluxConfig["auth"]>["order"]>;
+  oauth?: ReviewFluxConfig["oauth"];
+  apiKey?: ReviewFluxConfig["apiKey"];
+};
+
 export function getReviewFluxHome(home: string = homedir()): string {
   return join(home, ".reviewflux");
 }
 
 export function getConfigPath(home: string = homedir()): string {
   return join(getReviewFluxHome(home), "config.json");
+}
+
+export function getAuthStorePath(home: string = homedir()): string {
+  return join(getReviewFluxHome(home), "auth.json");
 }
 
 export function ensureReviewFluxHome(home: string = homedir()): string {
@@ -76,12 +88,79 @@ export function ensureReviewFluxHome(home: string = homedir()): string {
   return dir;
 }
 
+function writeConfigFile(path: string, config: Omit<ReviewFluxConfig, "auth" | "oauth" | "apiKey">): void {
+  writeFileSync(path, `${JSON.stringify(config, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+  chmodSync(path, 0o600);
+}
+
+function writeAuthStoreFile(params: {
+  authPath: string;
+  auth?: ReviewFluxConfig["auth"];
+  oauth?: ReviewFluxConfig["oauth"];
+  apiKey?: ReviewFluxConfig["apiKey"];
+}): void {
+  const profiles = params.auth?.profiles;
+  const hasProfiles = !!profiles && Object.keys(profiles).length > 0;
+  const hasOauth = !!params.oauth?.accessToken;
+  const hasApiKey = !!params.apiKey?.key?.trim();
+
+  if (!hasProfiles && !hasOauth && !hasApiKey) {
+    if (existsSync(params.authPath)) unlinkSync(params.authPath);
+    return;
+  }
+
+  const authStore: AuthStoreFile = {
+    version: 1,
+    ...(hasProfiles ? { profiles } : {}),
+    ...(params.auth?.order ? { order: params.auth.order } : {}),
+    ...(hasOauth ? { oauth: params.oauth } : {}),
+    ...(hasApiKey ? { apiKey: params.apiKey } : {}),
+  };
+
+  writeFileSync(params.authPath, `${JSON.stringify(authStore, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+  chmodSync(params.authPath, 0o600);
+}
+
 export function saveConfig(config: ReviewFluxConfig, home: string = homedir()): string {
   ensureReviewFluxHome(home);
   const path = getConfigPath(home);
-  writeFileSync(path, `${JSON.stringify(config, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
-  chmodSync(path, 0o600);
+  const authPath = getAuthStorePath(home);
+
+  const { auth, oauth, apiKey, ...configWithoutSecrets } = config;
+
+  writeConfigFile(path, configWithoutSecrets);
+  writeAuthStoreFile({ authPath, auth, oauth, apiKey });
+
   return path;
+}
+
+function readAuthStore(
+  home: string = homedir(),
+): Pick<ReviewFluxConfig, "auth" | "oauth" | "apiKey"> | undefined {
+  const authPath = getAuthStorePath(home);
+  if (!existsSync(authPath)) return undefined;
+
+  const raw = readFileSync(authPath, "utf8");
+  const parsed = JSON.parse(raw) as Partial<AuthStoreFile>;
+
+  const profiles = parsed.profiles && typeof parsed.profiles === "object" ? parsed.profiles : undefined;
+  const oauth = parsed.oauth && typeof parsed.oauth === "object" ? parsed.oauth : undefined;
+  const apiKey = parsed.apiKey && typeof parsed.apiKey === "object" ? parsed.apiKey : undefined;
+
+  if (!profiles && !oauth && !apiKey) return undefined;
+
+  return {
+    ...(profiles
+      ? {
+          auth: {
+            profiles,
+            ...(parsed.order && typeof parsed.order === "object" ? { order: parsed.order } : {}),
+          },
+        }
+      : {}),
+    ...(oauth ? { oauth } : {}),
+    ...(apiKey ? { apiKey } : {}),
+  };
 }
 
 export function loadConfig(home: string = homedir()): ReviewFluxConfig {
@@ -91,7 +170,33 @@ export function loadConfig(home: string = homedir()): ReviewFluxConfig {
   }
 
   const raw = readFileSync(path, "utf8");
-  return JSON.parse(raw) as ReviewFluxConfig;
+  const parsed = JSON.parse(raw) as ReviewFluxConfig;
+  const authStore = readAuthStore(home);
+
+  if (authStore) {
+    if (parsed.auth || parsed.oauth || parsed.apiKey) {
+      const { auth: _auth, oauth: _oauth, apiKey: _apiKey, ...publicConfig } = parsed;
+      writeConfigFile(path, publicConfig);
+    }
+
+    return {
+      ...parsed,
+      ...authStore,
+    };
+  }
+
+  if (parsed.auth || parsed.oauth || parsed.apiKey) {
+    writeAuthStoreFile({
+      authPath: getAuthStorePath(home),
+      auth: parsed.auth,
+      oauth: parsed.oauth,
+      apiKey: parsed.apiKey,
+    });
+    const { auth: _auth, oauth: _oauth, apiKey: _apiKey, ...publicConfig } = parsed;
+    writeConfigFile(path, publicConfig);
+  }
+
+  return parsed;
 }
 
 export function getActiveAuthProfile(config: ReviewFluxConfig, provider: LlmProvider): AuthProfile | undefined {
