@@ -4,4 +4,4 @@ export interface LlmProvider {
   generateReply(messages: ChatInput[]): Promise<string>;
 }
 
-export type LlmProviderName = "openai" | "gemini";
+export type LlmProviderName = string;

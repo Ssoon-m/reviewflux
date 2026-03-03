@@ -1,18 +1,11 @@
+import { getProviders } from "@mariozechner/pi-ai";
 import type { LlmProviderName } from "./types.js";
+import { isCustomProviderId } from "./custom-provider.js";
 
-const PROVIDER_ALIASES: Record<string, LlmProviderName> = {
-  openai: "openai",
-  "openai-codex": "openai",
-  codex: "openai",
-  google: "gemini",
-  gemini: "gemini",
-};
-
+/** Normalize and validate provider id: pi-ai getProviders() or custom-openai/custom-anthropic. */
 export function normalizeProviderId(raw: string): LlmProviderName {
   const normalized = raw.trim().toLowerCase();
-  const mapped = PROVIDER_ALIASES[normalized];
-  if (!mapped) {
-    throw new Error(`unsupported_provider:${raw}`);
-  }
-  return mapped;
+  if (isCustomProviderId(normalized)) return normalized as LlmProviderName;
+  if (getProviders().includes(normalized as never)) return normalized as LlmProviderName;
+  throw new Error(`unsupported_provider:${raw}`);
 }

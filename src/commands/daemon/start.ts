@@ -1,111 +1,53 @@
 import { setTimeout as wait } from "node:timers/promises";
 import { Agent } from "@mariozechner/pi-agent-core";
-import { getModel, refreshGoogleCloudToken, refreshOpenAICodexToken } from "@mariozechner/pi-ai";
+import { getModel } from "@mariozechner/pi-ai";
+import { apiKeyFromPiOAuth, refreshWithPiOAuth } from "../../auth/pi-oauth.js";
 import { getActiveAuthProfile, loadConfig, saveConfig, type ReviewFluxConfig } from "../../cli/config.js";
-
-type OAuthTokenResponse = {
-  accessToken: string;
-  refreshToken?: string;
-  tokenType?: string;
-  expiresInSec?: number;
-};
+import { isCustomProviderId } from "../../llm/custom-provider.js";
+import { createLlmProvider } from "../../llm/factory.js";
+import { resolveCodexEffort } from "../../llm/reasoning-effort.js";
 
 function resolveDaemonAuth(cfg: ReviewFluxConfig):
   | { mode: "oauth"; oauth: NonNullable<ReviewFluxConfig["oauth"]> }
   | { mode: "apikey"; apiKey: NonNullable<ReviewFluxConfig["apiKey"]> } {
-  const provider = cfg.llm;
-  const profile = getActiveAuthProfile(cfg, provider);
+  const profile = getActiveAuthProfile(cfg, cfg.llm);
+  if (profile?.mode === "oauth") return { mode: "oauth", oauth: profile.oauth };
+  if (profile?.mode === "apikey") return { mode: "apikey", apiKey: profile.apiKey };
 
-  if (profile?.mode === "oauth") {
-    return { mode: "oauth", oauth: profile.oauth };
-  }
-  if (profile?.mode === "apikey") {
-    return { mode: "apikey", apiKey: profile.apiKey };
-  }
-
-  // Legacy fallback (single-auth config)
-  if (cfg.authMode === "oauth" && cfg.oauth?.accessToken) {
-    return { mode: "oauth", oauth: cfg.oauth };
-  }
-  if (cfg.authMode === "apikey" && cfg.apiKey?.key?.trim()) {
-    return { mode: "apikey", apiKey: cfg.apiKey };
-  }
+  // Legacy fallback
+  if (cfg.authMode === "oauth" && cfg.oauth?.accessToken) return { mode: "oauth", oauth: cfg.oauth };
+  if (cfg.authMode === "apikey" && cfg.apiKey?.key?.trim()) return { mode: "apikey", apiKey: cfg.apiKey };
 
   throw new Error("daemon_missing_credentials");
-}
-
-async function fetchTextWithTimeout(
-  url: string,
-  init: RequestInit,
-  timeoutMs = 30_000,
-): Promise<{ status: number; ok: boolean; text: string }> {
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
-  try {
-    const res = await fetch(url, { ...init, signal: ctrl.signal });
-    const text = await res.text();
-    return { status: res.status, ok: res.ok, text };
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-async function refreshOAuthToken(params: {
-  tokenUrl: string;
-  clientId: string;
-  refreshToken: string;
-}): Promise<OAuthTokenResponse> {
-  const body = new URLSearchParams({
-    grant_type: "refresh_token",
-    refresh_token: params.refreshToken,
-    client_id: params.clientId,
-  });
-
-  const rawRes = await fetchTextWithTimeout(
-    params.tokenUrl,
-    {
-      method: "POST",
-      headers: { "content-type": "application/x-www-form-urlencoded" },
-      body,
-    },
-    30_000,
-  );
-
-  if (!rawRes.ok) throw new Error(`oauth_refresh_failed (${rawRes.status}): ${rawRes.text}`);
-
-  const json = JSON.parse(rawRes.text) as {
-    access_token?: string;
-    refresh_token?: string;
-    token_type?: string;
-    expires_in?: number;
-  };
-
-  if (!json.access_token) throw new Error("oauth_refresh_missing_access_token");
-
-  return {
-    accessToken: json.access_token,
-    refreshToken: json.refresh_token,
-    tokenType: json.token_type,
-    expiresInSec: json.expires_in,
-  };
 }
 
 function extractAssistantText(messages: unknown[]): string {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index] as { role?: string; content?: Array<{ type?: string; text?: string }> };
-    if (message?.role !== "assistant" || !Array.isArray(message.content)) {
-      continue;
-    }
+    if (message?.role !== "assistant" || !Array.isArray(message.content)) continue;
+
     const text = message.content
       .filter((item) => item?.type === "text" && typeof item.text === "string")
       .map((item) => item.text ?? "")
       .join("\n")
       .trim();
-    if (text.length > 0) {
-      return text;
-    }
+
+    if (text.length > 0) return text;
   }
   return "";
+}
+
+/** Use the provider id from config as the pi-ai provider (no hardcoded mapping). */
+function resolvePiProvider(params: {
+  llm: ReviewFluxConfig["llm"];
+  authMode: "oauth" | "apikey";
+  selectedModel: string;
+}): string {
+  if (params.selectedModel.includes("/")) {
+    const [rawProvider, ...rest] = params.selectedModel.split("/");
+    if (rest.length > 0 && rawProvider?.trim()) return rawProvider.trim();
+  }
+  return params.llm;
 }
 
 export async function runDaemonStartCommand(): Promise<void> {
@@ -116,59 +58,19 @@ export async function runDaemonStartCommand(): Promise<void> {
 
   if (
     activeAuth.mode === "oauth" &&
-    activeAuth.oauth.accessToken &&
     activeAuth.oauth.expiresAtEpochMs &&
     activeAuth.oauth.refreshToken &&
     Date.now() >= activeAuth.oauth.expiresAtEpochMs - 10_000
   ) {
     console.log("[reviewflux] access token expired soon. refreshing...");
-
-    if (cfg.llm === "gemini" && activeAuth.oauth.projectId) {
-      const refreshed = await refreshGoogleCloudToken(activeAuth.oauth.refreshToken, activeAuth.oauth.projectId);
-      activeAuth.oauth.accessToken = refreshed.access;
-      activeAuth.oauth.refreshToken = refreshed.refresh;
-      activeAuth.oauth.expiresAtEpochMs = refreshed.expires;
-      const refreshedMeta = refreshed as unknown as { projectId?: unknown };
-      activeAuth.oauth.projectId =
-        typeof refreshedMeta.projectId === "string" ? refreshedMeta.projectId : activeAuth.oauth.projectId;
-    } else if (cfg.llm === "codex") {
-      const refreshed = await refreshOpenAICodexToken(activeAuth.oauth.refreshToken);
-      activeAuth.oauth.accessToken = refreshed.access;
-      activeAuth.oauth.refreshToken = refreshed.refresh;
-      activeAuth.oauth.expiresAtEpochMs = refreshed.expires;
-      activeAuth.oauth.accountId =
-        typeof refreshed.accountId === "string" ? refreshed.accountId : activeAuth.oauth.accountId;
-    } else if (activeAuth.oauth.tokenUrl && activeAuth.oauth.clientId) {
-      const token = await refreshOAuthToken({
-        tokenUrl: activeAuth.oauth.tokenUrl,
-        clientId: activeAuth.oauth.clientId,
-        refreshToken: activeAuth.oauth.refreshToken,
-      });
-      activeAuth.oauth.accessToken = token.accessToken;
-      activeAuth.oauth.refreshToken = token.refreshToken ?? activeAuth.oauth.refreshToken;
-      activeAuth.oauth.tokenType = token.tokenType ?? activeAuth.oauth.tokenType;
-      activeAuth.oauth.expiresAtEpochMs = token.expiresInSec ? Date.now() + token.expiresInSec * 1000 : undefined;
-    }
-
-    // Keep legacy top-level fields in sync when they exist
-    if (cfg.oauth) {
-      cfg.oauth.accessToken = activeAuth.oauth.accessToken;
-      cfg.oauth.refreshToken = activeAuth.oauth.refreshToken;
-      cfg.oauth.tokenType = activeAuth.oauth.tokenType;
-      cfg.oauth.expiresAtEpochMs = activeAuth.oauth.expiresAtEpochMs;
-      cfg.oauth.projectId = activeAuth.oauth.projectId;
-      cfg.oauth.accountId = activeAuth.oauth.accountId;
-    }
-
+    const refreshed = await refreshWithPiOAuth(cfg.llm, activeAuth.oauth);
+    Object.assign(activeAuth.oauth, refreshed);
+    if (cfg.oauth) Object.assign(cfg.oauth, activeAuth.oauth);
     saveConfig(cfg);
   }
 
   const apiKey =
-    activeAuth.mode === "oauth"
-      ? cfg.llm === "gemini" && activeAuth.oauth.projectId
-        ? JSON.stringify({ token: activeAuth.oauth.accessToken, projectId: activeAuth.oauth.projectId })
-        : activeAuth.oauth.accessToken
-      : activeAuth.apiKey.key.trim();
+    activeAuth.mode === "oauth" ? apiKeyFromPiOAuth(cfg.llm, activeAuth.oauth) : activeAuth.apiKey.key.trim();
 
   console.log("[reviewflux] waiting 3 seconds before test request...");
   await wait(3000);
@@ -179,67 +81,57 @@ export async function runDaemonStartCommand(): Promise<void> {
     process.exit(1);
   }
 
+  const modelId = selectedModel.includes("/") ? selectedModel.split("/").slice(1).join("/") : selectedModel;
+
   try {
-    const resolveProvider = (): string => {
-      if (selectedModel.includes("/")) {
-        const [rawProvider, ...rest] = selectedModel.split("/");
-        if (rest.length > 0) {
-          const normalized = rawProvider.trim().toLowerCase();
-          if (normalized === "google" || normalized === "gemini") {
-            return cfg.llm === "gemini" && activeAuth.mode === "oauth" ? "google-gemini-cli" : "google";
-          }
-          if (normalized === "openai-codex") return "openai-codex";
-          if (normalized === "openai") return "openai";
-        }
+    let text: string;
+    if (isCustomProviderId(cfg.llm)) {
+      const client = createLlmProvider({
+        authMode: "apikey",
+        provider: cfg.llm,
+        baseUrl: cfg.llmApiBaseUrl.replace(/\/$/, ""),
+        model: modelId,
+        apiKey,
+      });
+      console.log(`[reviewflux] testing model: ${modelId} (provider=${cfg.llm})`);
+      text = await client.generateReply([{ role: "user", content: "안녕?" }]);
+    } else {
+      const modelProvider = resolvePiProvider({ llm: cfg.llm, authMode: activeAuth.mode, selectedModel });
+      const effort =
+        cfg.llm === "openai-codex"
+          ? resolveCodexEffort({ authMode: activeAuth.mode, model: modelId, requested: cfg.effort })
+          : undefined;
+
+      console.log(
+        `[reviewflux] testing model: ${modelId} (provider=${modelProvider}${effort ? `, effort=${effort}` : ""})`,
+      );
+      const model = getModel(modelProvider as never, modelId as never);
+      if (!model) throw new Error(`model_not_supported:${modelProvider}/${modelId}`);
+
+      const modelWithBaseUrl =
+        modelProvider === "openai-codex"
+          ? model
+          : {
+              ...model,
+              baseUrl: cfg.llmApiBaseUrl.replace(/\/$/, ""),
+            };
+
+      const agent = new Agent({ getApiKey: async () => apiKey });
+      agent.setSystemPrompt("You are a helpful assistant.");
+      agent.setModel(modelWithBaseUrl);
+      if (effort) {
+        agent.setThinkingLevel(effort);
       }
 
-      if (cfg.llm === "gemini") return activeAuth.mode === "oauth" ? "google-gemini-cli" : "google";
-      if (cfg.llm === "codex" || activeAuth.mode === "oauth") return "openai-codex";
-      return "openai";
-    };
-
-    const resolveModelId = (): string => {
-      if (!selectedModel.includes("/")) return selectedModel;
-      const [, ...rest] = selectedModel.split("/");
-      return rest.join("/") || selectedModel;
-    };
-
-    const modelProvider = resolveProvider();
-    const modelId = resolveModelId();
-    const effort = cfg.effort ?? "medium";
-    console.log(`[reviewflux] testing model: ${modelId} (provider=${modelProvider}, effort=${effort})`);
-    const model = getModel(modelProvider as never, modelId as never);
-    if (!model) {
-      throw new Error(`model_not_supported:${modelProvider}/${modelId}`);
+      await agent.prompt("안녕?");
+      text = extractAssistantText(agent.state.messages as unknown[]);
     }
-    const modelWithBaseUrl =
-      modelProvider === "openai-codex"
-        ? model
-        : {
-            ...model,
-            baseUrl: cfg.llmApiBaseUrl.replace(/\/$/, ""),
-          };
-
-    const agent = new Agent({
-      getApiKey: async () => apiKey,
-    });
-    agent.setSystemPrompt("You are a helpful assistant.");
-    agent.setModel(modelWithBaseUrl);
-    agent.setThinkingLevel(effort);
-
-    await agent.prompt("안녕?");
-
-    const text = extractAssistantText(agent.state.messages as unknown[]);
 
     console.log("[reviewflux] response:");
     if (text.length > 0) {
       console.log(text);
     } else {
       console.log("(no text block returned)");
-      console.log("[reviewflux] message roles:");
-      console.log(agent.state.messages.map((message) => (message as { role?: string }).role).join(","));
-      console.log("[reviewflux] raw messages:");
-      console.log(JSON.stringify(agent.state.messages, null, 2));
     }
   } catch (error) {
     console.error("[reviewflux] request failed (pi-ai)");

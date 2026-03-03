@@ -23,13 +23,13 @@ function makeConfig(patch: Partial<AppConfig>): AppConfig {
 }
 
 describe("createLlmService", () => {
-  it("rejects cross-provider alias when single baseUrl is configured", () => {
+  it("supports cross-provider alias when model/provider are valid in pi-ai", () => {
     const config = makeConfig({
       LLM_PROVIDER: "openai",
       LLM_MODEL: "fast",
-      LLM_MODEL_ALIASES_JSON: '{"fast":{"provider":"gemini","model":"gemini-2.5-flash"}}',
+      LLM_MODEL_ALIASES_JSON: '{"fast":{"provider":"google","model":"gemini-2.5-flash"}}',
     });
 
-    expect(() => createLlmService(config)).toThrow("provider_baseurl_mismatch:openai->gemini");
+    expect(() => createLlmService(config)).not.toThrow();
   });
 });

@@ -43,31 +43,31 @@ describe("cli-config", () => {
   it("resolves active auth profile by provider order", () => {
     const config: ReviewFluxConfig = {
       appName: "reviewflux",
-      llm: "gemini",
+      llm: "google",
       authMode: "apikey",
       llmApiBaseUrl: "https://generativelanguage.googleapis.com/v1beta",
       model: "gemini-2.5-flash",
       apiKey: { key: "legacy" },
       auth: {
         profiles: {
-          "gemini:old": {
-            provider: "gemini",
+          "google:old": {
+            provider: "google",
             mode: "apikey",
             apiKey: { key: "old-key" },
           },
-          "gemini:default": {
-            provider: "gemini",
+          "google:default": {
+            provider: "google",
             mode: "oauth",
             oauth: { accessToken: "new-token" },
           },
         },
         order: {
-          gemini: ["gemini:default", "gemini:old"],
+          google: ["google:default", "google:old"],
         },
       },
     };
 
-    const profile = getActiveAuthProfile(config, "gemini");
+    const profile = getActiveAuthProfile(config, "google");
     expect(profile?.mode).toBe("oauth");
   });
 });

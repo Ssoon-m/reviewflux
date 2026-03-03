@@ -32,46 +32,47 @@ function makeConfig(patch: Partial<AppConfig>): AppConfig {
 }
 
 describe("provider normalizer", () => {
-  it("normalizes aliases", () => {
-    expect(normalizeProviderId("google")).toBe("gemini");
-    expect(normalizeProviderId("openai-codex")).toBe("openai");
+  it("accepts pi-ai provider ids as-is (no aliasing)", () => {
+    expect(normalizeProviderId("google")).toBe("google");
+    expect(normalizeProviderId("openai-codex")).toBe("openai-codex");
   });
 });
 
 describe("model selection", () => {
-  it("uses exact model ids (no alias normalization)", () => {
-    expect(normalizeProviderModelId("gemini", "gemini-3-pro")).toBe("gemini-3-pro");
-    expect(normalizeProviderModelId("gemini", "gemini-3.1-pro")).toBe("gemini-3.1-pro");
+  it("normalizes google/gemini preview model ids for pi-ai", () => {
+    expect(normalizeProviderModelId("google", "gemini-3-pro")).toBe("gemini-3-pro-preview");
+    expect(normalizeProviderModelId("google", "gemini-3-flash")).toBe("gemini-3-flash-preview");
+    expect(normalizeProviderModelId("google", "gemini-3.1-pro")).toBe("gemini-3.1-pro");
   });
 
   it("parses model refs", () => {
-    expect(parseModelRef("gemini/gemini-2.5-flash", "openai")).toEqual({
-      provider: "gemini",
+    expect(parseModelRef("google/gemini-2.5-flash", "openai")).toEqual({
+      provider: "google",
       model: "gemini-2.5-flash",
     });
     expect(parseModelRef("gpt-4o-mini", "openai")).toEqual({ provider: "openai", model: "gpt-4o-mini" });
   });
 
   it("resolves alias index", () => {
-    const aliases = parseModelAliasesJson('{"fast":{"provider":"gemini","model":"gemini-2.5-flash"}}');
+    const aliases = parseModelAliasesJson('{"fast":{"provider":"google","model":"gemini-2.5-flash"}}');
     const index = buildModelAliasIndex(aliases);
     expect(resolveModelRefFromString({ raw: "fast", defaultProvider: "openai", aliasIndex: index })).toEqual({
-      provider: "gemini",
+      provider: "google",
       model: "gemini-2.5-flash",
     });
   });
 
   it("resolves alias and enforces allowlist", () => {
     const config = makeConfig({
-      LLM_PROVIDER: "gemini",
+      LLM_PROVIDER: "google",
       LLM_MODEL: "fast",
-      LLM_MODEL_ALIASES_JSON: '{"fast":{"provider":"gemini","model":"gemini-2.5-flash"}}',
-      LLM_ALLOWED_MODELS: "gemini/gemini-2.5-flash",
+      LLM_MODEL_ALIASES_JSON: '{"fast":{"provider":"google","model":"gemini-2.5-flash"}}',
+      LLM_ALLOWED_MODELS: "google/gemini-2.5-flash",
     });
 
     const resolved = resolveRequestedModelRef(config);
-    expect(resolved).toEqual({ provider: "gemini", model: "gemini-2.5-flash" });
-    expect(modelKey(resolved)).toBe("gemini/gemini-2.5-flash");
+    expect(resolved).toEqual({ provider: "google", model: "gemini-2.5-flash" });
+    expect(modelKey(resolved)).toBe("google/gemini-2.5-flash");
   });
 
   it("throws when model is not allowed", () => {
@@ -86,20 +87,20 @@ describe("model selection", () => {
 
   it("interprets unqualified allowlist entries with active provider", () => {
     const config = makeConfig({
-      LLM_PROVIDER: "gemini",
+      LLM_PROVIDER: "google",
       LLM_MODEL: "gemini-2.5-flash",
       LLM_ALLOWED_MODELS: "gemini-2.5-flash",
     });
 
-    expect(resolveRequestedModelRef(config)).toEqual({ provider: "gemini", model: "gemini-2.5-flash" });
+    expect(resolveRequestedModelRef(config)).toEqual({ provider: "google", model: "gemini-2.5-flash" });
   });
 
   it("rejects models that are not supported by pi-ai", () => {
     const config = makeConfig({
-      LLM_PROVIDER: "gemini",
-      LLM_MODEL: "gemini/gemini-2.6-ultra",
+      LLM_PROVIDER: "google",
+      LLM_MODEL: "google/gemini-2.6-ultra",
     });
 
-    expect(() => resolveRequestedModelRef(config)).toThrow("unsupported_model_for_provider:gemini/gemini-2.6-ultra");
+    expect(() => resolveRequestedModelRef(config)).toThrow("unsupported_model_for_provider:google/gemini-2.6-ultra");
   });
 });

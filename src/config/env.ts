@@ -2,7 +2,7 @@ import { z } from "zod";
 
 const schema = z
   .object({
-    LLM_PROVIDER: z.enum(["openai", "gemini"]).default("openai"),
+    LLM_PROVIDER: z.string().default("openai"),
     LLM_AUTH_MODE: z.enum(["oauth", "apikey"]).default("oauth"),
     LLM_API_KEY: z.string().optional(),
     LLM_MODEL_ALIASES_JSON: z.string().optional(),
@@ -32,10 +32,15 @@ const schema = z
       }
     }
   })
-  .transform((value) => ({
-    ...value,
-    LLM_MODEL: value.LLM_MODEL?.trim() || (value.LLM_PROVIDER === "gemini" ? "gemini-2.5-flash" : "gpt-4o-mini"),
-  }));
+  .transform((value) => {
+    const provider = value.LLM_PROVIDER.trim().toLowerCase();
+    const defaultModel = provider.startsWith("google") ? "gemini-2.5-flash" : "gpt-4o-mini";
+
+    return {
+      ...value,
+      LLM_MODEL: value.LLM_MODEL?.trim() || defaultModel,
+    };
+  });
 
 export type AppConfig = z.infer<typeof schema>;
 

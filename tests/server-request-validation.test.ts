@@ -23,7 +23,7 @@ describe("parsePromptText", () => {
   });
 
   it("parses model aliases JSON with lowercase keys", () => {
-    const aliases = parseModelAliasesJson('{"FAST":{"provider":"gemini","model":"gemini-2.5-flash"}}');
-    expect(aliases.fast).toEqual({ provider: "gemini", model: "gemini-2.5-flash" });
+    const aliases = parseModelAliasesJson('{"FAST":{"provider":"google","model":"gemini-2.5-flash"}}');
+    expect(aliases.fast).toEqual({ provider: "google", model: "gemini-2.5-flash" });
   });
 });

@@ -23,21 +23,21 @@ function makeConfig(patch: Partial<AppConfig>): AppConfig {
 }
 
 describe("resolveAuthInput", () => {
-  it("does not fallback to OPENAI_API_KEY for gemini", () => {
+  it("does not fallback to OPENAI_API_KEY for google", () => {
     const prevOpenAi = process.env.OPENAI_API_KEY;
     const prevGemini = process.env.GEMINI_API_KEY;
     process.env.OPENAI_API_KEY = "openai-key";
     delete process.env.GEMINI_API_KEY;
 
-    const config = makeConfig({ LLM_AUTH_MODE: "apikey", LLM_PROVIDER: "gemini" });
+    const config = makeConfig({ LLM_AUTH_MODE: "apikey", LLM_PROVIDER: "google" });
 
     expect(() =>
       resolveAuthInput({
         config,
-        provider: "gemini",
+        provider: "google",
         model: "gemini-2.5-flash",
       }),
-    ).toThrow("api_key_not_found_for_provider:gemini");
+    ).toThrow("api_key_not_found_for_provider:google");
 
     if (prevOpenAi === undefined) delete process.env.OPENAI_API_KEY;
     else process.env.OPENAI_API_KEY = prevOpenAi;

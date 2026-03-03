@@ -6,19 +6,21 @@ export type AuthMode = "oauth" | "apikey";
 
 export type EffortLevel = "low" | "medium" | "high" | "xhigh";
 
-export type LlmProvider = "codex" | "gemini" | "openai" | "anthropic";
+export type LlmProvider = string;
 
 export type OAuthConfig = {
   authorizeUrl?: string;
   tokenUrl?: string;
   clientId?: string;
   redirectUri?: string;
+  oauthProviderId?: string;
   accessToken: string;
   refreshToken?: string;
   tokenType?: string;
   expiresAtEpochMs?: number;
   projectId?: string;
   accountId?: string;
+  providerData?: Record<string, unknown>;
 };
 
 export type ApiKeyConfig = {
