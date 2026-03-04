@@ -6,9 +6,27 @@ export function normalizeRepoInput(input: string): string {
   const trimmed = input.trim();
   if (!trimmed) throw new Error("repo_required");
 
-  const noProtocol = trimmed.replace(/^https?:\/\//i, "");
-  const noHost = noProtocol.startsWith("github.com/") ? noProtocol.slice("github.com/".length) : noProtocol;
-  const noGit = noHost.replace(/\.git$/i, "");
+  let candidate = trimmed;
+  if (/^(www\.)?github\.com\//i.test(candidate)) {
+    candidate = `https://${candidate}`;
+  }
+
+  if (/^https?:\/\//i.test(candidate)) {
+    let parsed: URL;
+    try {
+      parsed = new URL(candidate);
+    } catch {
+      throw new Error("repo_format_invalid");
+    }
+
+    if (!/^(www\.)?github\.com$/i.test(parsed.hostname)) {
+      throw new Error("repo_format_invalid");
+    }
+
+    candidate = parsed.pathname;
+  }
+
+  const noGit = candidate.replace(/\.git$/i, "");
   const clean = noGit.replace(/^\/+|\/+$/g, "");
   const parts = clean.split("/").filter(Boolean);
 

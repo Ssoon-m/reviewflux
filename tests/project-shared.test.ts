@@ -9,6 +9,15 @@ describe("project shared", () => {
     expect(normalizeRepoInput("https://github.com/Ssoon-m/reviewflux")).toBe(
       "ssoon-m/reviewflux",
     );
+    expect(normalizeRepoInput("https://GitHub.com/Ssoon-m/reviewflux")).toBe(
+      "ssoon-m/reviewflux",
+    );
+    expect(normalizeRepoInput("https://www.github.com/Ssoon-m/reviewflux")).toBe(
+      "ssoon-m/reviewflux",
+    );
+    expect(normalizeRepoInput("github.com/Ssoon-m/reviewflux")).toBe(
+      "ssoon-m/reviewflux",
+    );
     expect(normalizeRepoInput("Ssoon-m/reviewflux")).toBe("ssoon-m/reviewflux");
   });
 
