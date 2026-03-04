@@ -52,7 +52,7 @@ export type ReviewFluxConfig = {
     string,
     {
       repo: string;
-      workspaceDir: string;
+      workspaceDir?: string;
       modelAlias?: string;
       pr: {
         mode: "opened_once" | "on_push";

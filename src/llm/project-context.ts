@@ -1,12 +1,9 @@
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { join, relative } from "node:path";
-
 export type ProjectContextConfig = {
   mode: "default" | "custom";
   include?: string[];
 };
 
-type ContextFile = {
+export type ContextFile = {
   path: string;
   content: string;
 };
@@ -29,73 +26,47 @@ function globToRegex(glob: string): RegExp {
   return new RegExp(`^${escaped}$`);
 }
 
-function listWorkspaceMarkdownFiles(workspaceDir: string): string[] {
-  const results: string[] = [];
-
-  const walk = (dir: string) => {
-    const entries = readdirSync(dir, { withFileTypes: true });
-    for (const entry of entries) {
-      if (entry.name === ".git" || entry.name === "node_modules") continue;
-      const fullPath = join(dir, entry.name);
-      if (entry.isDirectory()) {
-        walk(fullPath);
-        continue;
-      }
-      if (!entry.isFile()) continue;
-      if (!entry.name.toLowerCase().endsWith(".md")) continue;
-      results.push(fullPath);
-    }
-  };
-
-  if (existsSync(workspaceDir) && statSync(workspaceDir).isDirectory()) {
-    walk(workspaceDir);
-  }
-
-  return results;
-}
-
-function resolvePatterns(config?: ProjectContextConfig): string[] {
+export function resolveContextPatterns(config?: ProjectContextConfig): string[] {
   if (!config || config.mode === "default") return DEFAULT_CONTEXT_PATTERNS;
   const includes = (config.include ?? []).map((v) => v.trim()).filter(Boolean);
   return includes.length > 0 ? includes : DEFAULT_CONTEXT_PATTERNS;
 }
 
-function pickContextFiles(params: { workspaceDir: string; patterns: string[] }): ContextFile[] {
-  const files = listWorkspaceMarkdownFiles(params.workspaceDir);
+export function pickContextFilePaths(params: { filePaths: string[]; patterns: string[] }): string[] {
   const regexes = params.patterns.map(globToRegex);
 
-  const matched = files
+  return params.filePaths
     .filter((filePath) => {
-      const rel = normalizePathForMatch(relative(params.workspaceDir, filePath));
-      return regexes.some((regex) => regex.test(rel));
+      const relPath = normalizePathForMatch(filePath);
+      return relPath.toLowerCase().endsWith(".md") && regexes.some((regex) => regex.test(relPath));
     })
     .sort((a, b) => a.localeCompare(b))
     .slice(0, MAX_CONTEXT_FILES);
+}
+
+export function buildProjectContextText(params: {
+  context?: ProjectContextConfig;
+  files: ContextFile[];
+}): string {
+  const patterns = resolveContextPatterns(params.context);
+  const selectedPaths = new Set(pickContextFilePaths({ filePaths: params.files.map((file) => normalizePathForMatch(file.path)), patterns }));
+  const matched = params.files
+    .filter((file) => selectedPaths.has(normalizePathForMatch(file.path)))
+    .sort((a, b) => a.path.localeCompare(b.path));
 
   const contextFiles: ContextFile[] = [];
   let totalChars = 0;
 
-  for (const filePath of matched) {
-    const rel = normalizePathForMatch(relative(params.workspaceDir, filePath));
-    const raw = readFileSync(filePath, "utf8");
-    const content = raw.slice(0, MAX_FILE_CHARS);
+  for (const file of matched) {
+    const content = file.content.slice(0, MAX_FILE_CHARS);
     if (totalChars + content.length > MAX_TOTAL_CHARS) break;
     totalChars += content.length;
-    contextFiles.push({ path: rel, content });
+    contextFiles.push({ path: normalizePathForMatch(file.path), content });
   }
 
-  return contextFiles;
-}
+  if (contextFiles.length === 0) return "";
 
-export function buildProjectContextText(params: {
-  workspaceDir: string;
-  context?: ProjectContextConfig;
-}): string {
-  const patterns = resolvePatterns(params.context);
-  const files = pickContextFiles({ workspaceDir: params.workspaceDir, patterns });
-  if (files.length === 0) return "";
-
-  return files
+  return contextFiles
     .map((file) => `# Context File: ${file.path}\n\n${file.content}`)
     .join("\n\n---\n\n");
 }

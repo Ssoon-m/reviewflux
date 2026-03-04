@@ -1,18 +1,6 @@
 import { promptSelect, promptText } from "../../cli/clack-prompter.js";
 import { loadConfig, saveConfig, type ReviewFluxConfig } from "../../cli/config.js";
 import { normalizeRepoInput, type PrReviewMode } from "./shared.js";
-import { existsSync, statSync } from "node:fs";
-
-function resolveWorkspaceDir(input: string): string {
-  const trimmed = input.trim();
-  if (!trimmed) throw new Error("workspace_dir_required");
-  if (!existsSync(trimmed)) throw new Error(`workspace_dir_not_found:${trimmed}`);
-
-  const stat = statSync(trimmed);
-  if (stat.isDirectory()) return trimmed;
-
-  throw new Error(`workspace_dir_not_found:${trimmed}`);
-}
 
 function upsertRepoPolicy(config: ReviewFluxConfig, repo: string, modelAlias?: string): void {
   const nextPolicies = { ...(config.repoModelPolicies ?? {}) };
@@ -61,13 +49,6 @@ export async function runProjectAddCommand(): Promise<void> {
     initialValue: "opened_once",
   })) as PrReviewMode;
 
-  const workspacePathInput = await promptText({
-    message: "Local repository directory path",
-    initialValue: process.cwd(),
-    placeholder: "/Users/you/dev/repo",
-  });
-  const workspaceDir = resolveWorkspaceDir(workspacePathInput);
-
   const contextMode = await promptSelect<"default" | "custom">({
     message: "Review context files",
     options: [
@@ -93,7 +74,6 @@ export async function runProjectAddCommand(): Promise<void> {
   const projects = { ...(config.projects ?? {}) };
   projects[repo] = {
     repo,
-    workspaceDir,
     ...(modelAlias ? { modelAlias } : {}),
     pr: {
       mode,
@@ -114,7 +94,6 @@ export async function runProjectAddCommand(): Promise<void> {
 
   console.log(`[reviewflux] project added: ${repo}`);
   console.log(`[reviewflux] pr mode: ${mode}`);
-  console.log(`[reviewflux] workspace: ${workspaceDir}`);
   if (contextMode === "default") {
     console.log("[reviewflux] context: AGENTS.md");
   } else {

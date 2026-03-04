@@ -8,7 +8,7 @@ import { apiKeyFromPiOAuth, refreshWithPiOAuth } from "../../auth/pi-oauth.js";
 import { getActiveAuthProfile, loadConfig, saveConfig, type ReviewFluxConfig } from "../../cli/config.js";
 import { createLlmProvider } from "../../llm/factory.js";
 import { normalizeRepoKey } from "../../llm/model-routing.js";
-import { buildProjectContextText } from "../../llm/project-context.js";
+import { buildProjectContextText, pickContextFilePaths, resolveContextPatterns, type ContextFile } from "../../llm/project-context.js";
 
 type PullRequestSummary = {
   number: number;
@@ -22,6 +22,7 @@ type PullRequestDetail = {
   title: string;
   body?: string;
   html_url: string;
+  head: { sha: string };
 };
 
 type IssueComment = {
@@ -52,7 +53,7 @@ type DaemonState = {
 
 type ProjectConfig = {
   repo: string;
-  workspaceDir: string;
+  workspaceDir?: string;
   modelAlias?: string;
   pr: {
     mode: "opened_once" | "on_push";
@@ -65,6 +66,21 @@ type ProjectConfig = {
 };
 
 type ReviewTriggerReason = "opened_once" | "on_push" | "manual_force";
+
+type GitTreeEntry = {
+  path: string;
+  type: "blob" | "tree" | string;
+};
+
+type GitTreeResponse = {
+  tree?: GitTreeEntry[];
+};
+
+type GitHubContentsFile = {
+  type: "file";
+  encoding?: string;
+  content?: string;
+};
 
 const FORCE_COMMAND = "@reviewflux";
 const POLL_INTERVAL_MS = Number(process.env.REVIEWFLUX_POLL_INTERVAL_MS ?? "30000");
@@ -115,9 +131,52 @@ function ghExec(args: string[]): Promise<string> {
   });
 }
 
+function encodeGitHubApiPath(path: string): string {
+  return path
+    .split("/")
+    .map((segment) => encodeURIComponent(segment))
+    .join("/");
+}
+
 async function ghApiJson<T>(path: string): Promise<T> {
   const output = await ghExec(["api", path]);
   return JSON.parse(output) as T;
+}
+
+async function listRepoMarkdownPaths(repo: string, ref: string): Promise<string[]> {
+  const { owner, name } = parseOwnerRepo(repo);
+  const tree = await ghApiJson<GitTreeResponse>(`repos/${owner}/${name}/git/trees/${encodeURIComponent(ref)}?recursive=1`);
+  const markdownPaths = (tree.tree ?? [])
+    .filter((entry) => entry.type === "blob" && entry.path.toLowerCase().endsWith(".md"))
+    .map((entry) => entry.path);
+  return markdownPaths.sort((a, b) => a.localeCompare(b));
+}
+
+async function fetchRepoFileContent(repo: string, filePath: string, ref: string): Promise<string | null> {
+  const { owner, name } = parseOwnerRepo(repo);
+  const encodedPath = encodeGitHubApiPath(filePath);
+  const response = await ghApiJson<GitHubContentsFile | GitHubContentsFile[]>(`repos/${owner}/${name}/contents/${encodedPath}?ref=${encodeURIComponent(ref)}`);
+  if (Array.isArray(response) || response.type !== "file") return null;
+  if (response.encoding !== "base64" || !response.content) return null;
+  return Buffer.from(response.content.replaceAll("\n", ""), "base64").toString("utf8");
+}
+
+async function buildRemoteProjectContextText(project: ProjectConfig, ref: string): Promise<string> {
+  const markdownPaths = await listRepoMarkdownPaths(project.repo, ref);
+  const patterns = resolveContextPatterns(project.context);
+  const selectedPaths = pickContextFilePaths({ filePaths: markdownPaths, patterns });
+  const files: ContextFile[] = [];
+
+  for (const filePath of selectedPaths) {
+    const content = await fetchRepoFileContent(project.repo, filePath, ref);
+    if (!content) continue;
+    files.push({ path: filePath, content });
+  }
+
+  return buildProjectContextText({
+    context: project.context,
+    files,
+  });
 }
 
 function containsForceCommand(body?: string): boolean {
@@ -263,19 +322,13 @@ async function createReviewComment(params: {
   config: ReviewFluxConfig;
   project: ProjectConfig;
   repo: string;
-  prNumber: number;
+  pr: PullRequestDetail;
   reason: ReviewTriggerReason;
   projectContext: string;
 }): Promise<string> {
   const { provider, model } = resolveProjectModel(params.config, params.project);
   const apiKey = await resolveApiKeyForProvider(params.config, provider);
-
-  const pr = await ghApiJson<PullRequestDetail>(`repos/${parseOwnerRepo(params.repo).owner}/${parseOwnerRepo(params.repo).name}/pulls/${params.prNumber}`);
-  if (pr.number !== params.prNumber) {
-    throw new Error(`pr_mismatch:${params.repo}#${params.prNumber}`);
-  }
-
-  const diff = await ghExec(["pr", "diff", String(params.prNumber), "-R", params.repo]);
+  const diff = await ghExec(["pr", "diff", String(params.pr.number), "-R", params.repo]);
 
   const fallbackModel = getModel(provider as never, model as never);
   const baseUrl = provider === params.config.llm ? params.config.llmApiBaseUrl.replace(/\/$/, "") : (fallbackModel?.baseUrl ?? params.config.llmApiBaseUrl.replace(/\/$/, ""));
@@ -292,16 +345,25 @@ async function createReviewComment(params: {
       role: "system",
       content: buildReviewSystemPrompt({
         repo: params.repo,
-        prNumber: params.prNumber,
+        prNumber: params.pr.number,
         reason: params.reason,
         projectContext: params.projectContext,
       }),
     },
     {
       role: "user",
-      content: buildReviewUserPrompt({ pr, diff }),
+      content: buildReviewUserPrompt({ pr: params.pr, diff }),
     },
   ]);
+}
+
+async function fetchPullRequestDetail(repo: string, prNumber: number): Promise<PullRequestDetail> {
+  const { owner, name } = parseOwnerRepo(repo);
+  const pr = await ghApiJson<PullRequestDetail>(`repos/${owner}/${name}/pulls/${prNumber}`);
+  if (pr.number !== prNumber) {
+    throw new Error(`pr_mismatch:${repo}#${prNumber}`);
+  }
+  return pr;
 }
 
 async function postReviewComment(repo: string, prNumber: number, body: string): Promise<void> {
@@ -315,16 +377,20 @@ async function triggerReview(params: {
   prNumber: number;
   reason: ReviewTriggerReason;
 }): Promise<void> {
-  const projectContext = buildProjectContextText({
-    workspaceDir: params.project.workspaceDir,
-    context: params.project.context,
-  });
+  const pr = await fetchPullRequestDetail(params.repo, params.prNumber);
+  let projectContext = "";
+  try {
+    projectContext = await buildRemoteProjectContextText(params.project, pr.head.sha);
+  } catch (error) {
+    console.error(`[reviewflux] failed to load context for ${params.repo}@${pr.head.sha}`);
+    console.error(error instanceof Error ? error.message : String(error));
+  }
 
   const comment = await createReviewComment({
     config: params.config,
     project: params.project,
     repo: params.repo,
-    prNumber: params.prNumber,
+    pr,
     reason: params.reason,
     projectContext,
   });
