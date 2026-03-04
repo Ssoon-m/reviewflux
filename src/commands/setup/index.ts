@@ -1,8 +1,18 @@
 import { spawn, spawnSync } from "node:child_process";
-import { chmodSync, existsSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { getModel, getModels, getOAuthProvider, getOAuthProviders } from "@mariozechner/pi-ai";
-import { promptPassword, promptSelect, promptText } from "../../cli/clack-prompter.js";
+import { fileURLToPath } from "node:url";
+import {
+  getModel,
+  getModels,
+  getOAuthProvider,
+  getOAuthProviders,
+} from "@mariozechner/pi-ai";
+import {
+  promptPassword,
+  promptSelect,
+  promptText,
+} from "../../cli/clack-prompter.js";
 import {
   ensureReviewFluxHome,
   saveConfig,
@@ -10,7 +20,10 @@ import {
   type LlmProvider,
   type ReviewFluxConfig,
 } from "../../cli/config.js";
-import { loginWithPiOAuth, resolveOAuthProviderId } from "../../auth/pi-oauth.js";
+import {
+  loginWithPiOAuth,
+  resolveOAuthProviderId,
+} from "../../auth/pi-oauth.js";
 import {
   getCustomProviderId,
   type CustomCompatibility,
@@ -27,69 +40,84 @@ import { getCodexEffortLevels } from "../../llm/reasoning-effort.js";
 type SetupOptions = { advanced: boolean };
 
 const GLOBAL_AGENTS_FILE = "AGENTS.md";
+const GLOBAL_AGENTS_TEMPLATE_FILE = "REVIEWFLUX-AGENTS.md";
+const GLOBAL_AGENTS_TEMPLATE_RELATIVE_DIR = [
+  "src",
+  "commands",
+  "setup",
+] as const;
+
+type GlobalAgentsTemplateResolution = {
+  content: string;
+  source: string;
+};
 
 function globalAgentsPath(home: string): string {
   return join(home, GLOBAL_AGENTS_FILE);
 }
 
-function defaultGlobalAgentsTemplate(): string {
+function embeddedGlobalAgentsTemplate(): string {
   return [
-    "# ReviewFlux Review Agent Policy",
+    "# ReviewFlux 리뷰 에이전트 정책 (fallback)",
     "",
-    "## 1) Role",
-    "- You are a code review agent.",
-    "- Goal: prevent bugs/risks, improve maintainability, and maintain consistency with team rules.",
+    "이 파일은 setup 기본 템플릿 파일(REVIEWFLUX-AGENTS.md)을 찾지 못했을 때만 사용됩니다.",
     "",
-    "## 2) Core Principles",
-    "- Do not guess; verify with code/tests/types/build results.",
-    "- Do not go beyond the request scope. (Critical risks are the exception.)",
-    "- If uncertain, state that clearly and specify what information is needed.",
-    "- No approval without evidence.",
+    "🧠 ReviewFlux Review",
     "",
-    "## 3) Review Output Format",
-    "- For all outputs (summary/findings/verification notes), use this prefix once at the start of the whole response:",
-    "  - [reviewflux-ai]  (two spaces after the prefix)",
+    "### 요약",
+    "- 전체 판단을 2-4줄로 작성한다.",
     "",
-    "### Summary",
-    "- Overall judgment in 2-4 lines (Approve / Request Changes / Comment)",
-    "",
-    "### Findings (ordered by severity)",
-    "- [Severity][Area] Title",
-    "- Evidence: file/function/supporting basis",
-    "- Risk: risk if not fixed",
-    "- Recommendation: specific fix direction",
-    "- Confidence: High / Medium / Low",
-    "",
-    "### Verification Notes",
-    "- Verified: tests/types/build/static review",
-    "- Not Verified: include the reason",
-    "",
-    "## 4) Default Decision Format",
-    "1. Issue (one line)",
-    "2. Evidence (line/code context)",
-    "3. Risk",
-    "4. Recommendation",
-    "",
-    "Line reference example:",
-    "- src/commands/project/shared.ts:9",
-    "  - Owner/repo extraction occurs before host normalization, which can lead to incorrect repository resolution.",
-    "",
-    "Recommended comment template:",
-    "- [Severity][Area] Title",
-    "- Location: path/to/file.ts:123",
-    "- Evidence: ...",
-    "- Risk: ...",
-    "- Recommendation: ...",
+    "### 검증 메모",
+    "- Verified: 확인한 항목",
+    "- Not Verified: 확인하지 못한 항목과 이유",
     "",
   ].join("\n");
 }
 
-function ensureGlobalAgentsTemplate(home: string): boolean {
+function resolveGlobalAgentsTemplate(): GlobalAgentsTemplateResolution {
+  const moduleDir = fileURLToPath(new URL(".", import.meta.url));
+  const candidatePaths = [
+    join(
+      process.cwd(),
+      ...GLOBAL_AGENTS_TEMPLATE_RELATIVE_DIR,
+      GLOBAL_AGENTS_TEMPLATE_FILE,
+    ),
+    join(process.cwd(), GLOBAL_AGENTS_TEMPLATE_FILE),
+    join(moduleDir, GLOBAL_AGENTS_TEMPLATE_FILE),
+    join(
+      moduleDir,
+      "..",
+      "..",
+      ...GLOBAL_AGENTS_TEMPLATE_RELATIVE_DIR,
+      GLOBAL_AGENTS_TEMPLATE_FILE,
+    ),
+    join(moduleDir, "..", "..", GLOBAL_AGENTS_TEMPLATE_FILE),
+    join(moduleDir, "..", "..", "..", GLOBAL_AGENTS_TEMPLATE_FILE),
+  ];
+
+  for (const path of candidatePaths) {
+    if (!existsSync(path)) continue;
+    const content = readFileSync(path, "utf8");
+    if (content.trim()) return { content, source: path };
+  }
+
+  return {
+    content: embeddedGlobalAgentsTemplate(),
+    source: "embedded fallback",
+  };
+}
+
+function ensureGlobalAgentsTemplate(home: string): {
+  created: boolean;
+  source: string;
+} {
   const path = globalAgentsPath(home);
-  if (existsSync(path)) return false;
-  writeFileSync(path, defaultGlobalAgentsTemplate(), { encoding: "utf8", mode: 0o600 });
+  if (existsSync(path)) return { created: false, source: path };
+
+  const template = resolveGlobalAgentsTemplate();
+  writeFileSync(path, template.content, { encoding: "utf8", mode: 0o600 });
   chmodSync(path, 0o600);
-  return true;
+  return { created: true, source: template.source };
 }
 
 function parseSetupOptions(args: string[]): SetupOptions {
@@ -108,7 +136,10 @@ function isOAuthCapableProvider(provider: string): boolean {
 }
 
 /** Use the chosen provider id as-is; pi-ai defines models and auth per provider. */
-function resolveApiProviderForSetup(params: { authMode: AuthMode; provider: LlmProvider }): string {
+function resolveApiProviderForSetup(params: {
+  authMode: AuthMode;
+  provider: LlmProvider;
+}): string {
   return params.provider;
 }
 
@@ -119,7 +150,10 @@ function assertModelSupportedByPiAi(params: {
 }): void {
   const piProvider = resolveApiProviderForSetup(params);
   const resolved = getModel(piProvider as never, params.model as never);
-  if (!resolved) throw new Error(`model_not_supported_by_pi_ai:${piProvider}/${params.model}`);
+  if (!resolved)
+    throw new Error(
+      `model_not_supported_by_pi_ai:${piProvider}/${params.model}`,
+    );
 }
 
 async function pickDefaultModel(params: {
@@ -138,7 +172,10 @@ async function pickDefaultModel(params: {
 
   return promptSelect<string>({
     message: params.message,
-    options: available.map((model) => ({ label: `${model.id} (${model.name})`, value: model.id })),
+    options: available.map((model) => ({
+      label: `${model.id} (${model.name})`,
+      value: model.id,
+    })),
     initialValue: fallback,
   });
 }
@@ -173,14 +210,19 @@ function releaseInteractiveInput(): void {
   process.stdin.pause();
 }
 
-function extractDeviceCode(instructions: string | undefined): string | undefined {
+function extractDeviceCode(
+  instructions: string | undefined,
+): string | undefined {
   if (!instructions) return undefined;
   const match = instructions.match(/enter\s+code\s*:\s*(.+)$/i);
   const code = match?.[1]?.trim();
   return code && code.length > 0 ? code : undefined;
 }
 
-function manualOAuthPromptForProvider(provider: LlmProvider): { message: string; placeholder: string } {
+function manualOAuthPromptForProvider(provider: LlmProvider): {
+  message: string;
+  placeholder: string;
+} {
   if (provider === "openai-codex") {
     return {
       message: "Paste OpenAI redirect URL or authorization code",
@@ -194,7 +236,9 @@ function manualOAuthPromptForProvider(provider: LlmProvider): { message: string;
   };
 }
 
-async function collectOAuthConfig(provider: LlmProvider): Promise<NonNullable<ReviewFluxConfig["oauth"]>> {
+async function collectOAuthConfig(
+  provider: LlmProvider,
+): Promise<NonNullable<ReviewFluxConfig["oauth"]>> {
   const oauthMode = await promptSelect<"browser" | "paste">({
     message: "OAuth setup method",
     options: [
@@ -209,13 +253,19 @@ async function collectOAuthConfig(provider: LlmProvider): Promise<NonNullable<Re
       await promptPassword({ message: "Paste OAuth access token", mask: "*" }),
       "oauth_access_token",
     );
-    const refreshTokenRaw = await promptPassword({ message: "Refresh token (optional)", mask: "*" });
+    const refreshTokenRaw = await promptPassword({
+      message: "Refresh token (optional)",
+      mask: "*",
+    });
     const refreshToken = refreshTokenRaw.trim() || undefined;
 
     const providerId = resolveOAuthProviderId(provider);
     const projectIdRaw =
       providerId === "google-gemini-cli"
-        ? await promptText({ message: "Google project ID (optional; needed for refresh)", initialValue: "" })
+        ? await promptText({
+            message: "Google project ID (optional; needed for refresh)",
+            initialValue: "",
+          })
         : "";
 
     return {
@@ -227,7 +277,8 @@ async function collectOAuthConfig(provider: LlmProvider): Promise<NonNullable<Re
   }
 
   const isGitHubCopilot = provider === "github-copilot";
-  const usesCallbackServer = getOAuthProvider(provider)?.usesCallbackServer === true;
+  const usesCallbackServer =
+    getOAuthProvider(provider)?.usesCallbackServer === true;
 
   const callbacks: Parameters<typeof loginWithPiOAuth>[1] = {
     onAuth: ({ url, instructions }) => {
@@ -247,7 +298,9 @@ async function collectOAuthConfig(provider: LlmProvider): Promise<NonNullable<Re
         console.log(`\n${instructions.trim()}`);
       }
       if (usesCallbackServer && !isGitHubCopilot) {
-        console.log("[reviewflux] waiting for browser callback. If needed, paste redirect URL in terminal.");
+        console.log(
+          "[reviewflux] waiting for browser callback. If needed, paste redirect URL in terminal.",
+        );
       }
       console.log("");
 
@@ -255,20 +308,32 @@ async function collectOAuthConfig(provider: LlmProvider): Promise<NonNullable<Re
       if (opened) {
         console.log("[reviewflux] opening browser for OAuth login...");
       } else {
-        console.log("[reviewflux] browser auto-open failed. open the URL above manually.");
+        console.log(
+          "[reviewflux] browser auto-open failed. open the URL above manually.",
+        );
       }
     },
     onPrompt: async (prompt) => {
-      if (isGitHubCopilot && prompt.message.includes("GitHub Enterprise URL/domain")) {
-        console.log("[reviewflux] Using github.com (press setup again for enterprise if needed).");
+      if (
+        isGitHubCopilot &&
+        prompt.message.includes("GitHub Enterprise URL/domain")
+      ) {
+        console.log(
+          "[reviewflux] Using github.com (press setup again for enterprise if needed).",
+        );
         return "";
       }
 
       const anthropicCodePlaceholder =
-        provider === "anthropic" && /authorization code/i.test(prompt.message) ? "code#state" : prompt.placeholder;
+        provider === "anthropic" && /authorization code/i.test(prompt.message)
+          ? "code#state"
+          : prompt.placeholder;
 
       while (true) {
-        const value = await promptText({ message: prompt.message, initialValue: anthropicCodePlaceholder ?? "" });
+        const value = await promptText({
+          message: prompt.message,
+          initialValue: anthropicCodePlaceholder ?? "",
+        });
         if (value.trim().length > 0 || prompt.allowEmpty) return value;
         console.log("[reviewflux] OAuth input is required.");
       }
@@ -298,7 +363,9 @@ async function collectOAuthConfig(provider: LlmProvider): Promise<NonNullable<Re
       const message = error instanceof Error ? error.message : String(error);
       const isStateMismatch = /state/i.test(message);
       if (!isStateMismatch || attempt === 1) throw error;
-      console.log("[reviewflux] OAuth state mismatch detected. Retrying with a fresh login session...");
+      console.log(
+        "[reviewflux] OAuth state mismatch detected. Retrying with a fresh login session...",
+      );
       console.log("[reviewflux] Use only the latest URL opened by this retry.");
     }
   }
@@ -311,13 +378,21 @@ async function pickCodexEffort(params: {
   model: string;
   defaultEffort?: "low" | "medium" | "high" | "xhigh";
 }): Promise<"low" | "medium" | "high" | "xhigh"> {
-  const supported = getCodexEffortLevels({ authMode: params.authMode, model: params.model });
-  const fallback = supported.includes("medium") ? "medium" : supported[0] ?? "low";
+  const supported = getCodexEffortLevels({
+    authMode: params.authMode,
+    model: params.model,
+  });
+  const fallback = supported.includes("medium")
+    ? "medium"
+    : (supported[0] ?? "low");
 
   return promptSelect<"low" | "medium" | "high" | "xhigh">({
     message: `Select reasoning effort (${supported.join("/")})`,
     options: supported.map((level) => ({ label: level, value: level })),
-    initialValue: params.defaultEffort && supported.includes(params.defaultEffort) ? params.defaultEffort : fallback,
+    initialValue:
+      params.defaultEffort && supported.includes(params.defaultEffort)
+        ? params.defaultEffort
+        : fallback,
   });
 }
 
@@ -329,24 +404,46 @@ function defaultBaseUrlForProvider(provider: string): string {
 /** Orchestrates prompts for custom provider; validation is delegated to llm/custom-provider. */
 async function saveCustomProviderConfig(): Promise<void> {
   const baseUrl = assertNonEmpty(
-    await promptText({ message: "Custom endpoint base URL", initialValue: "https://api.openai.com/v1" }),
+    await promptText({
+      message: "Custom endpoint base URL",
+      initialValue: "https://api.openai.com/v1",
+    }),
     "base_url",
   );
   const modelId = assertNonEmpty(
-    await promptText({ message: "Model ID", placeholder: "e.g. gpt-4o or claude-3-5-sonnet" }),
+    await promptText({
+      message: "Model ID",
+      placeholder: "e.g. gpt-4o or claude-3-5-sonnet",
+    }),
     "model_id",
   );
   const compatibility = (await promptSelect<CustomCompatibility>({
     message: "API compatibility",
     options: [
-      { label: "OpenAI", value: "openai", hint: "OpenAI-style /v1/chat/completions" },
-      { label: "Anthropic", value: "anthropic", hint: "Anthropic Messages API" },
+      {
+        label: "OpenAI",
+        value: "openai",
+        hint: "OpenAI-style /v1/chat/completions",
+      },
+      {
+        label: "Anthropic",
+        value: "anthropic",
+        hint: "Anthropic Messages API",
+      },
     ],
     initialValue: "openai",
   })) as CustomCompatibility;
-  const key = assertNonEmpty(await promptPassword({ message: "API key", mask: "*" }), "api_key");
+  const key = assertNonEmpty(
+    await promptPassword({ message: "API key", mask: "*" }),
+    "api_key",
+  );
 
-  const validated = validateCustomProviderConfig({ baseUrl, modelId, compatibility, apiKey: key });
+  const validated = validateCustomProviderConfig({
+    baseUrl,
+    modelId,
+    compatibility,
+    apiKey: key,
+  });
   const provider = getCustomProviderId(validated.compatibility);
   const profileId = `${provider}:default`;
 
@@ -379,12 +476,17 @@ async function saveCustomProviderConfig(): Promise<void> {
 
 async function runSetup(options: SetupOptions): Promise<void> {
   const home = ensureReviewFluxHome();
-  const createdGlobalAgents = ensureGlobalAgentsTemplate(home);
+  const globalAgents = ensureGlobalAgentsTemplate(home);
 
   console.log("[reviewflux] setup started");
   console.log(`[reviewflux] config directory: ${home}`);
-  if (createdGlobalAgents) {
-    console.log(`[reviewflux] created global review guidance: ${globalAgentsPath(home)}`);
+  if (globalAgents.created) {
+    console.log(
+      `[reviewflux] created global review guidance: ${globalAgentsPath(home)}`,
+    );
+    console.log(
+      `[reviewflux] global review template source: ${globalAgents.source}`,
+    );
   }
 
   const groups = getProviderGroupsForSelection();
@@ -401,7 +503,11 @@ async function runSetup(options: SetupOptions): Promise<void> {
     const selectedGroupKey = await promptSelect<string>({
       message: "Model/auth provider",
       options: [
-        { label: "Custom Provider", value: CUSTOM_GROUP_VALUE, hint: "Any OpenAI or Anthropic compatible endpoint" },
+        {
+          label: "Custom Provider",
+          value: CUSTOM_GROUP_VALUE,
+          hint: "Any OpenAI or Anthropic compatible endpoint",
+        },
         ...groups.map((g) => ({
           label: g.groupLabel,
           value: g.groupKey,
@@ -410,11 +516,14 @@ async function runSetup(options: SetupOptions): Promise<void> {
         { label: "Skip for now", value: SKIP_VALUE },
       ],
       initialValue:
-        groups.find((g) => g.providers.includes("openai-codex"))?.groupKey ?? groups[0]!.groupKey,
+        groups.find((g) => g.providers.includes("openai-codex"))?.groupKey ??
+        groups[0]!.groupKey,
     });
 
     if (selectedGroupKey === SKIP_VALUE) {
-      console.log("[reviewflux] setup skipped. Run reviewflux setup again when ready.");
+      console.log(
+        "[reviewflux] setup skipped. Run reviewflux setup again when ready.",
+      );
       releaseInteractiveInput();
       return;
     }
@@ -442,8 +551,9 @@ async function runSetup(options: SetupOptions): Promise<void> {
         { label: "Back", value: BACK_VALUE },
       ],
       initialValue:
-        selectedGroup.providers.find((p) => p === "openai-codex" || p === "google-gemini-cli") ??
-        selectedGroup.providers[0]!,
+        selectedGroup.providers.find(
+          (p) => p === "openai-codex" || p === "google-gemini-cli",
+        ) ?? selectedGroup.providers[0]!,
     });
 
     if (methodSelection === BACK_VALUE) {
@@ -453,14 +563,21 @@ async function runSetup(options: SetupOptions): Promise<void> {
     break;
   }
 
-  const authMode: AuthMode = isOAuthCapableProvider(provider) ? "oauth" : "apikey";
+  const authMode: AuthMode = isOAuthCapableProvider(provider)
+    ? "oauth"
+    : "apikey";
 
-  const defaultBaseUrl = defaultBaseUrlForProvider(resolveApiProviderForSetup({ authMode, provider }));
+  const defaultBaseUrl = defaultBaseUrlForProvider(
+    resolveApiProviderForSetup({ authMode, provider }),
+  );
   let llmApiBaseUrl = defaultBaseUrl;
 
   if (options.advanced) {
     llmApiBaseUrl = assertNonEmpty(
-      (await promptText({ message: "LLM API base URL", initialValue: defaultBaseUrl })) || defaultBaseUrl,
+      (await promptText({
+        message: "LLM API base URL",
+        initialValue: defaultBaseUrl,
+      })) || defaultBaseUrl,
       "llm_api_base_url",
     );
   }
@@ -468,7 +585,10 @@ async function runSetup(options: SetupOptions): Promise<void> {
   const profileId = `${provider}:default`;
 
   if (authMode === "apikey") {
-    const key = assertNonEmpty(await promptPassword({ message: "Paste API key", mask: "*" }), "api_key");
+    const key = assertNonEmpty(
+      await promptPassword({ message: "Paste API key", mask: "*" }),
+      "api_key",
+    );
     const model = await pickDefaultModel({
       message: "Select default model",
       authMode,
@@ -476,7 +596,10 @@ async function runSetup(options: SetupOptions): Promise<void> {
     });
     assertModelSupportedByPiAi({ authMode, provider, model });
 
-    const effort = provider === "openai-codex" ? await pickCodexEffort({ authMode, model, defaultEffort: "medium" }) : undefined;
+    const effort =
+      provider === "openai-codex"
+        ? await pickCodexEffort({ authMode, model, defaultEffort: "medium" })
+        : undefined;
 
     const config: ReviewFluxConfig = {
       appName: "reviewflux",
@@ -519,7 +642,10 @@ async function runSetup(options: SetupOptions): Promise<void> {
   });
   assertModelSupportedByPiAi({ authMode, provider, model });
 
-  const effort = provider === "openai-codex" ? await pickCodexEffort({ authMode, model, defaultEffort: "medium" }) : undefined;
+  const effort =
+    provider === "openai-codex"
+      ? await pickCodexEffort({ authMode, model, defaultEffort: "medium" })
+      : undefined;
 
   const config: ReviewFluxConfig = {
     appName: "reviewflux",

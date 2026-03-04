@@ -357,16 +357,19 @@ function buildReviewSystemPrompt(params: {
   projectContext: string;
 }): string {
   return [
-    "You are ReviewFlux, a pull request review assistant.",
-    "Provide concise, actionable review comments focused on correctness, risk, and maintainability.",
-    "When prefixing with [reviewflux-ai], include it exactly once at the very beginning of the whole response.",
-    "Use this exact prefix token: [reviewflux-ai]  (two spaces after the prefix).",
-    "Do not repeat [reviewflux-ai] per bullet, section, or line.",
-    `Repository: ${params.repo}`,
-    `Pull Request: #${params.prNumber}`,
-    `Trigger reason: ${params.reason}`,
-    ...(params.globalAgentsGuidance ? ["", "Global review guidance (~/.reviewflux/AGENTS.md):", params.globalAgentsGuidance] : []),
-    ...(params.projectContext ? ["", "Project markdown context:", params.projectContext] : []),
+    "당신은 ReviewFlux PR 리뷰 어시스턴트다.",
+    "정확성, 리스크, 유지보수성에 초점을 맞춘 간결하고 실행 가능한 리뷰 코멘트를 작성한다.",
+    "응답 첫 줄은 반드시 다음과 정확히 일치해야 한다: 🧠 ReviewFlux Review",
+    "이슈가 없으면 발견 사항 섹션을 생략하고, 요약에 중대한 수정 필요 없음을 명시한다.",
+    "발견 사항을 작성할 때 심각도는 [Small], [Medium], [High]만 사용한다.",
+    "라인 참조는 path:line 형식을 사용한다.",
+    "[Pasted ...], ..., TBD, N/A 같은 플레이스홀더/메타 텍스트를 구체적 이유 없이 출력하지 않는다.",
+    "템플릿 플레이스홀더 대신 구체적인 근거와 명시적인 권장 조치를 작성한다.",
+    `저장소: ${params.repo}`,
+    `풀 리퀘스트: #${params.prNumber}`,
+    `트리거 사유: ${params.reason}`,
+    ...(params.globalAgentsGuidance ? ["", "전역 리뷰 가이드 (~/.reviewflux/AGENTS.md):", params.globalAgentsGuidance] : []),
+    ...(params.projectContext ? ["", "프로젝트 마크다운 컨텍스트:", params.projectContext] : []),
   ].join("\n");
 }
 
