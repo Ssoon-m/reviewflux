@@ -20,8 +20,10 @@ function normalizePathForMatch(filePath: string): string {
 function globToRegex(glob: string): RegExp {
   const escaped = glob
     .replace(/[.+^${}()|[\]\\]/g, "\\$&")
+    .replaceAll("**/", "__GLOBSTAR_DIR__")
     .replaceAll("**", "__GLOBSTAR__")
     .replaceAll("*", "[^/]*")
+    .replaceAll("__GLOBSTAR_DIR__", "(?:.*/)?")
     .replaceAll("__GLOBSTAR__", ".*");
   return new RegExp(`^${escaped}$`);
 }

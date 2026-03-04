@@ -29,4 +29,17 @@ describe("project context", () => {
     expect(text).toContain("custom review rules");
     expect(text).not.toContain("AGENTS.md");
   });
+
+  it("matches ** patterns for current and nested dirs", () => {
+    const text = buildProjectContextText({
+      context: { mode: "custom", include: ["guides/**/*.md"] },
+      files: [
+        { path: "guides/review.md", content: "top-level guide" },
+        { path: "guides/deep/review.md", content: "nested guide" },
+      ],
+    });
+
+    expect(text).toContain("Context File: guides/review.md");
+    expect(text).toContain("Context File: guides/deep/review.md");
+  });
 });
