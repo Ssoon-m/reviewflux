@@ -359,6 +359,9 @@ function buildReviewSystemPrompt(params: {
   return [
     "You are ReviewFlux, a pull request review assistant.",
     "Provide concise, actionable review comments focused on correctness, risk, and maintainability.",
+    "When prefixing with [reviewflux-ai], include it exactly once at the very beginning of the whole response.",
+    "Use this exact prefix token: [reviewflux-ai]  (two spaces after the prefix).",
+    "Do not repeat [reviewflux-ai] per bullet, section, or line.",
     `Repository: ${params.repo}`,
     `Pull Request: #${params.prNumber}`,
     `Trigger reason: ${params.reason}`,
@@ -451,8 +454,8 @@ async function triggerReview(params: {
   repo: string;
   prNumber: number;
   reason: ReviewTriggerReason;
-  globalAgentsGuidance: string;
 }): Promise<void> {
+  const globalAgentsGuidance = loadGlobalAgentsGuidance();
   const pr = await fetchPullRequestDetail(params.repo, params.prNumber);
   let projectContext = "";
   try {
@@ -468,7 +471,7 @@ async function triggerReview(params: {
     repo: params.repo,
     pr,
     reason: params.reason,
-    globalAgentsGuidance: params.globalAgentsGuidance,
+    globalAgentsGuidance,
     projectContext,
   });
 
@@ -480,7 +483,6 @@ async function pollProject(params: {
   config: ReviewFluxConfig;
   state: DaemonState;
   repo: string;
-  globalAgentsGuidance: string;
 }): Promise<void> {
   const { config, state, repo } = params;
   const project = config.projects?.[normalizeRepoKey(repo)] as ProjectConfig | undefined;
@@ -505,7 +507,6 @@ async function pollProject(params: {
           repo,
           prNumber: pr.number,
           reason: resolveReasonForPrAction(project, "opened"),
-          globalAgentsGuidance: params.globalAgentsGuidance,
         });
       }
       projectState.prHeads[prNum] = pr.head.sha;
@@ -520,7 +521,6 @@ async function pollProject(params: {
           repo,
           prNumber: pr.number,
           reason: resolveReasonForPrAction(project, "synchronize"),
-          globalAgentsGuidance: params.globalAgentsGuidance,
         });
       }
       projectState.prHeads[prNum] = pr.head.sha;
@@ -531,6 +531,10 @@ async function pollProject(params: {
     if (!activeNumbers.has(number)) {
       delete projectState.prHeads[number];
     }
+  }
+
+  if (project.pr.mode === "opened_once") {
+    return;
   }
 
   const forceCommand = project.pr.forceCommand?.trim() || FORCE_COMMAND;
@@ -553,7 +557,6 @@ async function pollProject(params: {
       repo,
       prNumber: issue.number,
       reason: "manual_force",
-      globalAgentsGuidance: params.globalAgentsGuidance,
     });
     trackSeenCommentId(projectState, seenId);
   }
@@ -573,7 +576,6 @@ async function pollProject(params: {
       repo,
       prNumber,
       reason: "manual_force",
-      globalAgentsGuidance: params.globalAgentsGuidance,
     });
     trackSeenCommentId(projectState, seenId);
   }
@@ -586,7 +588,6 @@ async function assertGhReady(): Promise<void> {
 
 export async function runDaemonStartCommand(): Promise<void> {
   const config = loadConfig();
-  const globalAgentsGuidance = loadGlobalAgentsGuidance();
   const projects = Object.values(config.projects ?? {}).sort((a, b) => a.repo.localeCompare(b.repo));
 
   console.log("[reviewflux] daemon start");
@@ -605,7 +606,7 @@ export async function runDaemonStartCommand(): Promise<void> {
     const contextInfo = project.context?.mode === "custom" ? `custom:${(project.context.include ?? []).join(",")}` : "default:AGENTS.md";
     console.log(`- ${project.repo} | mode=${project.pr.mode} | model=${modelValue} | context=${contextInfo}`);
   }
-  console.log(`[reviewflux] force command is always enabled: ${FORCE_COMMAND}`);
+  console.log(`[reviewflux] force command is enabled for mode=on_push projects: ${FORCE_COMMAND}`);
 
   const state = loadDaemonState();
   const abortController = new AbortController();
@@ -625,7 +626,6 @@ export async function runDaemonStartCommand(): Promise<void> {
           config,
           state,
           repo: project.repo,
-          globalAgentsGuidance,
         });
       } catch (error) {
         console.error(`[reviewflux] polling failed for ${project.repo}`);
