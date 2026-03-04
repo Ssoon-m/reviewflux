@@ -11,7 +11,7 @@ export async function runProjectListCommand(): Promise<void> {
 
   console.log("[reviewflux] configured projects:");
   for (const project of entries) {
-    const model = project.modelAlias ?? "<default>";
+    const model = project.model ? `${project.model.provider}/${project.model.model}` : (project.modelAlias ?? "<default>");
     const contextInfo =
       project.context?.mode === "custom"
         ? `custom:${(project.context.include ?? []).join(",")}`

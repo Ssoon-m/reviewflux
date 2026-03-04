@@ -1,5 +1,7 @@
 import { spawn, spawnSync } from "node:child_process";
-import { getModel, getModels, getOAuthProvider, getOAuthProviders, getProviders } from "@mariozechner/pi-ai";
+import { chmodSync, existsSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { getModel, getModels, getOAuthProvider, getOAuthProviders } from "@mariozechner/pi-ai";
 import { promptPassword, promptSelect, promptText } from "../../cli/clack-prompter.js";
 import {
   ensureReviewFluxHome,
@@ -14,9 +16,81 @@ import {
   type CustomCompatibility,
   validateCustomProviderConfig,
 } from "../../llm/custom-provider.js";
+import {
+  getProviderChoiceHint,
+  getProviderChoiceLabel,
+  getProviderGroupsForSelection,
+  getSelectableModelsForProvider,
+} from "../../llm/provider-catalog.js";
 import { getCodexEffortLevels } from "../../llm/reasoning-effort.js";
 
 type SetupOptions = { advanced: boolean };
+
+const GLOBAL_AGENTS_FILE = "AGENTS.md";
+
+function globalAgentsPath(home: string): string {
+  return join(home, GLOBAL_AGENTS_FILE);
+}
+
+function defaultGlobalAgentsTemplate(): string {
+  return [
+    "# ReviewFlux Review Agent Policy",
+    "",
+    "## 1) Role",
+    "- You are a code review agent.",
+    "- Goal: prevent bugs/risks, improve maintainability, and maintain consistency with team rules.",
+    "",
+    "## 2) Core Principles",
+    "- Do not guess; verify with code/tests/types/build results.",
+    "- Do not go beyond the request scope. (Critical risks are the exception.)",
+    "- If uncertain, state that clearly and specify what information is needed.",
+    "- No approval without evidence.",
+    "",
+    "## 3) Review Output Format",
+    "- For all outputs (summary/findings/verification notes), use this prefix at the start of each item:",
+    "  - [reviewflux-ai]  ",
+    "",
+    "### Summary",
+    "- Overall judgment in 2-4 lines (Approve / Request Changes / Comment)",
+    "",
+    "### Findings (ordered by severity)",
+    "- [Severity][Area] Title",
+    "- Evidence: file/function/supporting basis",
+    "- Risk: risk if not fixed",
+    "- Recommendation: specific fix direction",
+    "- Confidence: High / Medium / Low",
+    "",
+    "### Verification Notes",
+    "- Verified: tests/types/build/static review",
+    "- Not Verified: include the reason",
+    "",
+    "## 4) Default Decision Format",
+    "1. Issue (one line)",
+    "2. Evidence (line/code context)",
+    "3. Risk",
+    "4. Recommendation",
+    "",
+    "Line reference example:",
+    "- src/commands/project/shared.ts:9",
+    "  - Owner/repo extraction occurs before host normalization, which can lead to incorrect repository resolution.",
+    "",
+    "Recommended comment template:",
+    "- [Severity][Area] Title",
+    "- Location: path/to/file.ts:123",
+    "- Evidence: ...",
+    "- Risk: ...",
+    "- Recommendation: ...",
+    "",
+  ].join("\n");
+}
+
+function ensureGlobalAgentsTemplate(home: string): boolean {
+  const path = globalAgentsPath(home);
+  if (existsSync(path)) return false;
+  writeFileSync(path, defaultGlobalAgentsTemplate(), { encoding: "utf8", mode: 0o600 });
+  chmodSync(path, 0o600);
+  return true;
+}
 
 function parseSetupOptions(args: string[]): SetupOptions {
   return { advanced: args.includes("--advanced") };
@@ -26,97 +100,6 @@ function assertNonEmpty(value: string, field: string): string {
   const trimmed = value.trim();
   if (!trimmed) throw new Error(`${field}_required`);
   return trimmed;
-}
-
-/** Provider label: OAuth providers use pi-ai’s .name; others use a short display hint. */
-function getProviderChoiceLabel(providerId: string): string {
-  if (providerId === "google") return "Google Gemini API key";
-  if (providerId === "google-gemini-cli") return "Google Gemini CLI OAuth";
-  const oauth = getOAuthProviders().find((p) => p.id === providerId);
-  if (oauth) return oauth.name;
-  if (providerId === "openai") return "OpenAI API key";
-  return providerId;
-}
-
-function getProviderChoiceHint(providerId: string): string | undefined {
-  if (providerId === "google-gemini-cli") {
-    return "Unofficial flow; review account-risk warning before use";
-  }
-  return undefined;
-}
-
-/** OpenClaw-style labels and hints (aligned with openclaw auth-choice-options AUTH_CHOICE_GROUP_DEFS). */
-const GROUP_LABELS: Record<string, string> = {
-  google: "Google",
-  openai: "OpenAI",
-  anthropic: "Anthropic",
-  amazon: "Amazon (Bedrock)",
-  azure: "Azure",
-  mistral: "Mistral AI",
-  huggingface: "Hugging Face",
-  xai: "xAI (Grok)",
-  groq: "Groq",
-  openrouter: "OpenRouter",
-  github: "Copilot",
-  minimax: "MiniMax",
-  cerebras: "Cerebras",
-  vercel: "Vercel AI Gateway",
-  zai: "Z.AI",
-  opencode: "OpenCode Zen",
-  kimi: "Kimi",
-};
-
-const GROUP_HINTS: Partial<Record<string, string>> = {
-  google: "Gemini API key + OAuth",
-  openai: "Codex OAuth + API key",
-  anthropic: "setup-token + API key",
-  xai: "API key",
-  groq: "API key",
-  openrouter: "API key",
-  mistral: "API key",
-  huggingface: "Inference API (HF token)",
-  github: "GitHub + local proxy",
-  minimax: "M2.5 (recommended)",
-  opencode: "API key",
-  vercel: "API key",
-  zai: "GLM Coding Plan / Global / CN",
-};
-
-type ProviderGroup = { groupKey: string; groupLabel: string; providers: string[]; hint?: string };
-
-/** Build OpenClaw-style groups: same vendor → one first-level choice with auth hint, then "X auth method". */
-function getProviderGroups(): ProviderGroup[] {
-  const oauthIds = new Set(getOAuthProviders().map((p) => p.id));
-  const excludedInSetup = new Set(["google-antigravity", "google-vertex"]);
-  const all = getProviders()
-    .filter((id) => !excludedInSetup.has(id))
-    .slice()
-    .sort((a, b) => a.localeCompare(b));
-  const byGroup = new Map<string, string[]>();
-
-  for (const id of all) {
-    const key = id.includes("-") ? id.split("-")[0]! : id;
-    const list = byGroup.get(key) ?? [];
-    list.push(id);
-    byGroup.set(key, list);
-  }
-
-  return Array.from(byGroup.entries())
-    .map(([key, providers]) => {
-      const sorted = providers.sort((a, b) => a.localeCompare(b));
-      const hasOAuth = sorted.some((p) => oauthIds.has(p));
-      const hasApikey = sorted.some((p) => !oauthIds.has(p));
-      const derivedHint =
-        GROUP_HINTS[key] ??
-        (hasOAuth && hasApikey ? "API key + OAuth" : hasOAuth ? "OAuth" : "API key");
-      return {
-        groupKey: key,
-        groupLabel: GROUP_LABELS[key] ?? key.charAt(0).toUpperCase() + key.slice(1),
-        providers: sorted,
-        hint: derivedHint,
-      };
-    })
-    .sort((a, b) => a.groupLabel.localeCompare(b.groupLabel));
 }
 
 /** OAuth support comes from pi-ai’s OAuth provider registry only. */
@@ -139,24 +122,14 @@ function assertModelSupportedByPiAi(params: {
   if (!resolved) throw new Error(`model_not_supported_by_pi_ai:${piProvider}/${params.model}`);
 }
 
-function getSelectableModels(params: {
-  authMode: AuthMode;
-  provider: LlmProvider;
-}): Array<{ id: string; name: string }> {
-  const provider = resolveApiProviderForSetup(params);
-
-  return getModels(provider as never)
-    .map((model) => ({ id: model.id, name: model.name }))
-    .sort((a, b) => a.id.localeCompare(b.id));
-}
-
 async function pickDefaultModel(params: {
   message: string;
   authMode: AuthMode;
   provider: LlmProvider;
   defaultModel?: string;
 }): Promise<string> {
-  const available = getSelectableModels(params);
+  const provider = resolveApiProviderForSetup(params);
+  const available = getSelectableModelsForProvider(provider);
   const fallback = params.defaultModel ?? available[0]?.id;
 
   if (!fallback) {
@@ -318,7 +291,19 @@ async function collectOAuthConfig(provider: LlmProvider): Promise<NonNullable<Re
     };
   }
 
-  return loginWithPiOAuth(provider, callbacks);
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      return await loginWithPiOAuth(provider, callbacks);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const isStateMismatch = /state/i.test(message);
+      if (!isStateMismatch || attempt === 1) throw error;
+      console.log("[reviewflux] OAuth state mismatch detected. Retrying with a fresh login session...");
+      console.log("[reviewflux] Use only the latest URL opened by this retry.");
+    }
+  }
+
+  throw new Error("oauth_login_failed");
 }
 
 async function pickCodexEffort(params: {
@@ -394,11 +379,15 @@ async function saveCustomProviderConfig(): Promise<void> {
 
 async function runSetup(options: SetupOptions): Promise<void> {
   const home = ensureReviewFluxHome();
+  const createdGlobalAgents = ensureGlobalAgentsTemplate(home);
 
   console.log("[reviewflux] setup started");
   console.log(`[reviewflux] config directory: ${home}`);
+  if (createdGlobalAgents) {
+    console.log(`[reviewflux] created global review guidance: ${globalAgentsPath(home)}`);
+  }
 
-  const groups = getProviderGroups();
+  const groups = getProviderGroupsForSelection();
   if (groups.length === 0) {
     throw new Error("no_providers_from_pi_ai");
   }
@@ -539,7 +528,6 @@ async function runSetup(options: SetupOptions): Promise<void> {
     llmApiBaseUrl,
     model,
     ...(effort ? { effort } : {}),
-    oauth,
     auth: {
       profiles: {
         [profileId]: {

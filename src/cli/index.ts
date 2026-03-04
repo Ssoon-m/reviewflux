@@ -56,6 +56,7 @@ async function main() {
 
   if (cmd === "project" && subcmd === "add") {
     await runProjectAddCommand();
+    process.exit(0);
     return;
   }
 
@@ -71,6 +72,7 @@ async function main() {
 
   if (cmd === "project" && subcmd === "set-model") {
     await runProjectSetModelCommand();
+    process.exit(0);
     return;
   }
 

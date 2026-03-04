@@ -1,38 +1,55 @@
 import { promptSelect, promptText } from "../../cli/clack-prompter.js";
 import { loadConfig, saveConfig, type ReviewFluxConfig } from "../../cli/config.js";
-import { normalizeRepoInput } from "./shared.js";
+import { getSelectableModelsForProvider } from "../../llm/provider-catalog.js";
+import { ensureProviderCredentials, normalizeRepoInput, pickProjectProvider } from "./shared.js";
 
-function updateRepoPolicy(config: ReviewFluxConfig, repo: string, modelAlias?: string): void {
-  const nextPolicies = { ...(config.repoModelPolicies ?? {}) };
-  const existing = nextPolicies[repo] ?? {};
-
-  if (modelAlias) {
-    nextPolicies[repo] = { ...existing, defaultAlias: modelAlias };
-  } else if (existing.taskAliases) {
-    nextPolicies[repo] = { taskAliases: existing.taskAliases };
-  } else {
-    delete nextPolicies[repo];
-  }
-
-  config.repoModelPolicies = Object.keys(nextPolicies).length > 0 ? nextPolicies : undefined;
+function resolveLegacyProjectModel(params: {
+  config: ReviewFluxConfig;
+  modelAlias?: string;
+}): { provider: string; model: string } | undefined {
+  if (!params.modelAlias) return undefined;
+  return params.config.modelAliases?.[params.modelAlias];
 }
 
-async function pickAlias(config: ReviewFluxConfig): Promise<string | undefined> {
-  const aliases = Object.keys(config.modelAliases ?? {}).sort((a, b) => a.localeCompare(b));
-  if (aliases.length === 0) {
-    return undefined;
-  }
-
-  const selected = await promptSelect<string>({
+async function pickProjectModel(
+  config: ReviewFluxConfig,
+  currentModel?: { provider: string; model: string },
+): Promise<{ provider: string; model: string } | undefined> {
+  const mode = await promptSelect<"__default__" | "__project__">({
     message: "Set project model",
     options: [
       { label: "Use default model", value: "__default__" },
-      ...aliases.map((alias) => ({ label: alias, value: alias })),
+      { label: "Select project model", value: "__project__" },
     ],
-    initialValue: "__default__",
+    initialValue: currentModel ? "__project__" : "__default__",
   });
 
-  return selected === "__default__" ? undefined : selected;
+  if (mode === "__default__") return undefined;
+
+  const selectedProvider = await pickProjectProvider(currentModel?.provider ?? config.llm);
+  await ensureProviderCredentials(config, selectedProvider);
+
+  const models = getSelectableModelsForProvider(selectedProvider);
+  if (models.length === 0) return undefined;
+
+  const initialModel =
+    currentModel?.provider === selectedProvider
+      ? currentModel.model
+      : selectedProvider === config.llm
+        ? (config.model ?? models[0]?.id)
+        : models[0]?.id;
+
+  const selectedModel = await promptSelect<string>({
+    message: "Select project model",
+    options: models.map((model) => ({ label: `${model.id} (${model.name})`, value: model.id })),
+    initialValue: initialModel,
+  });
+
+  if (selectedProvider === config.llm && selectedModel === config.model) return undefined;
+  return {
+    provider: selectedProvider,
+    model: selectedModel,
+  };
 }
 
 export async function runProjectSetModelCommand(): Promise<void> {
@@ -48,20 +65,24 @@ export async function runProjectSetModelCommand(): Promise<void> {
   const target = projects[repo];
   if (!target) throw new Error(`project_not_found:${repo}`);
 
-  const alias = await pickAlias(config);
+  const currentModel = target.model ?? resolveLegacyProjectModel({ config, modelAlias: target.modelAlias });
+  const projectModel = await pickProjectModel(config, currentModel);
   const nextProject = {
     ...target,
-    ...(alias ? { modelAlias: alias } : {}),
+    ...(projectModel ? { model: projectModel } : {}),
   };
-  if (!alias) {
+  if (projectModel) {
+    delete nextProject.modelAlias;
+  }
+  if (!projectModel) {
+    delete nextProject.model;
     delete nextProject.modelAlias;
   }
   projects[repo] = nextProject;
 
   config.projects = projects;
-  updateRepoPolicy(config, repo, alias);
   saveConfig(config);
 
   console.log(`[reviewflux] project model updated: ${repo}`);
-  console.log(`[reviewflux] model alias: ${alias ?? "<default>"}`);
+  console.log(`[reviewflux] model: ${projectModel ? `${projectModel.provider}/${projectModel.model}` : "<default>"}`);
 }

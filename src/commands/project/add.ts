@@ -1,34 +1,42 @@
 import { promptSelect, promptText } from "../../cli/clack-prompter.js";
 import { loadConfig, saveConfig, type ReviewFluxConfig } from "../../cli/config.js";
-import { normalizeRepoInput, type PrReviewMode } from "./shared.js";
+import { getSelectableModelsForProvider } from "../../llm/provider-catalog.js";
+import { ensureProviderCredentials, normalizeRepoInput, pickProjectProvider, type PrReviewMode } from "./shared.js";
 
-function upsertRepoPolicy(config: ReviewFluxConfig, repo: string, modelAlias?: string): void {
-  const nextPolicies = { ...(config.repoModelPolicies ?? {}) };
-  const existing = nextPolicies[repo] ?? {};
-
-  if (modelAlias) {
-    nextPolicies[repo] = { ...existing, defaultAlias: modelAlias };
-  } else if (existing.taskAliases) {
-    nextPolicies[repo] = { taskAliases: existing.taskAliases };
-  } else {
-    delete nextPolicies[repo];
-  }
-
-  config.repoModelPolicies = Object.keys(nextPolicies).length > 0 ? nextPolicies : undefined;
-}
-
-function resolveModelAliasSelection(config: ReviewFluxConfig): Promise<string | undefined> {
-  const aliases = Object.keys(config.modelAliases ?? {}).sort((a, b) => a.localeCompare(b));
-  if (aliases.length === 0) return Promise.resolve(undefined);
-
-  return promptSelect<string>({
+async function resolveProjectModelSelection(
+  config: ReviewFluxConfig,
+): Promise<{ provider: string; model: string } | undefined> {
+  const mode = await promptSelect<"__default__" | "__project__">({
     message: "Project model",
     options: [
       { label: "Use default model", value: "__default__" },
-      ...aliases.map((alias) => ({ label: alias, value: alias })),
+      { label: "Select project model", value: "__project__" },
     ],
     initialValue: "__default__",
-  }).then((value) => (value === "__default__" ? undefined : value));
+  });
+
+  if (mode === "__default__") return undefined;
+
+  const selectedProvider = await pickProjectProvider(config.llm);
+  await ensureProviderCredentials(config, selectedProvider);
+
+  const models = getSelectableModelsForProvider(selectedProvider);
+  if (models.length === 0) return undefined;
+
+  const selectedModel = await promptSelect<string>({
+    message: "Select project model",
+    options: models.map((model) => ({ label: `${model.id} (${model.name})`, value: model.id })),
+    initialValue: selectedProvider === config.llm ? (config.model ?? models[0]?.id) : models[0]?.id,
+  });
+
+  if (selectedProvider === config.llm && selectedModel === config.model) {
+    return undefined;
+  }
+
+  return {
+    provider: selectedProvider,
+    model: selectedModel,
+  };
 }
 
 export async function runProjectAddCommand(): Promise<void> {
@@ -69,12 +77,12 @@ export async function runProjectAddCommand(): Promise<void> {
           .filter(Boolean)
       : undefined;
 
-  const modelAlias = await resolveModelAliasSelection(config);
+  const projectModel = await resolveProjectModelSelection(config);
 
   const projects = { ...(config.projects ?? {}) };
   projects[repo] = {
     repo,
-    ...(modelAlias ? { modelAlias } : {}),
+    ...(projectModel ? { model: projectModel } : {}),
     pr: {
       mode,
       forceCommand: "@reviewflux",
@@ -89,7 +97,6 @@ export async function runProjectAddCommand(): Promise<void> {
   };
 
   config.projects = projects;
-  upsertRepoPolicy(config, repo, modelAlias);
   saveConfig(config);
 
   console.log(`[reviewflux] project added: ${repo}`);
@@ -99,10 +106,10 @@ export async function runProjectAddCommand(): Promise<void> {
   } else {
     console.log(`[reviewflux] context: ${(customPatterns ?? ["AGENTS.md"]).join(", ")}`);
   }
-  if (modelAlias) {
-    console.log(`[reviewflux] project model alias: ${modelAlias}`);
+  if (projectModel) {
+    console.log(`[reviewflux] project model: ${projectModel.provider}/${projectModel.model}`);
   } else {
-    console.log("[reviewflux] project model alias: <default>");
+    console.log("[reviewflux] project model: <default>");
   }
   console.log("[reviewflux] force command is always enabled: @reviewflux");
 }

@@ -57,6 +57,7 @@ type ProjectConfig = {
   repo: string;
   workspaceDir?: string;
   modelAlias?: string;
+  model?: { provider: string; model: string };
   pr: {
     mode: "opened_once" | "on_push";
     forceCommand: "@reviewflux";
@@ -86,6 +87,7 @@ type GitHubContentsFile = {
 
 const FORCE_COMMAND = "@reviewflux";
 const MAX_DIFF_CHARS = 18000;
+const MAX_GLOBAL_AGENTS_CHARS = 6000;
 
 function resolvePollIntervalMs(raw: string | undefined): number {
   const parsed = Number.parseInt(raw ?? "", 10);
@@ -97,6 +99,20 @@ const POLL_INTERVAL_MS = resolvePollIntervalMs(process.env.REVIEWFLUX_POLL_INTER
 
 function daemonStatePath(home: string = homedir()): string {
   return join(home, ".reviewflux", "daemon-state.json");
+}
+
+function globalAgentsPath(home: string = homedir()): string {
+  return join(home, ".reviewflux", "AGENTS.md");
+}
+
+function loadGlobalAgentsGuidance(home: string = homedir()): string {
+  const path = globalAgentsPath(home);
+  if (!existsSync(path)) return "";
+  try {
+    return readFileSync(path, "utf8").slice(0, MAX_GLOBAL_AGENTS_CHARS).trim();
+  } catch {
+    return "";
+  }
 }
 
 function loadDaemonState(home: string = homedir()): DaemonState {
@@ -261,6 +277,13 @@ function resolveReasonForPrAction(project: ProjectConfig, action: "opened" | "sy
 }
 
 function resolveProjectModel(config: ReviewFluxConfig, project: ProjectConfig): { provider: string; model: string } {
+  if (project.model?.provider && project.model.model) {
+    return {
+      provider: project.model.provider,
+      model: project.model.model,
+    };
+  }
+
   const alias = project.modelAlias;
   if (alias && !config.modelAliases?.[alias]) {
     throw new Error(`project_model_alias_not_found:${project.repo}:${alias}`);
@@ -326,13 +349,20 @@ function truncate(text: string, max: number): string {
   return `${text.slice(0, max)}\n\n...[truncated]`;
 }
 
-function buildReviewSystemPrompt(params: { repo: string; prNumber: number; reason: ReviewTriggerReason; projectContext: string }): string {
+function buildReviewSystemPrompt(params: {
+  repo: string;
+  prNumber: number;
+  reason: ReviewTriggerReason;
+  globalAgentsGuidance: string;
+  projectContext: string;
+}): string {
   return [
     "You are ReviewFlux, a pull request review assistant.",
     "Provide concise, actionable review comments focused on correctness, risk, and maintainability.",
     `Repository: ${params.repo}`,
     `Pull Request: #${params.prNumber}`,
     `Trigger reason: ${params.reason}`,
+    ...(params.globalAgentsGuidance ? ["", "Global review guidance (~/.reviewflux/AGENTS.md):", params.globalAgentsGuidance] : []),
     ...(params.projectContext ? ["", "Project markdown context:", params.projectContext] : []),
   ].join("\n");
 }
@@ -358,6 +388,7 @@ async function createReviewComment(params: {
   repo: string;
   pr: PullRequestDetail;
   reason: ReviewTriggerReason;
+  globalAgentsGuidance: string;
   projectContext: string;
 }): Promise<string> {
   const { provider, model } = resolveProjectModel(params.config, params.project);
@@ -390,6 +421,7 @@ async function createReviewComment(params: {
         repo: params.repo,
         prNumber: params.pr.number,
         reason: params.reason,
+        globalAgentsGuidance: params.globalAgentsGuidance,
         projectContext: params.projectContext,
       }),
     },
@@ -419,6 +451,7 @@ async function triggerReview(params: {
   repo: string;
   prNumber: number;
   reason: ReviewTriggerReason;
+  globalAgentsGuidance: string;
 }): Promise<void> {
   const pr = await fetchPullRequestDetail(params.repo, params.prNumber);
   let projectContext = "";
@@ -435,6 +468,7 @@ async function triggerReview(params: {
     repo: params.repo,
     pr,
     reason: params.reason,
+    globalAgentsGuidance: params.globalAgentsGuidance,
     projectContext,
   });
 
@@ -442,7 +476,13 @@ async function triggerReview(params: {
   console.log(`[reviewflux] review posted: ${params.repo}#${params.prNumber} reason=${params.reason}`);
 }
 
-async function pollProject(config: ReviewFluxConfig, state: DaemonState, repo: string): Promise<void> {
+async function pollProject(params: {
+  config: ReviewFluxConfig;
+  state: DaemonState;
+  repo: string;
+  globalAgentsGuidance: string;
+}): Promise<void> {
+  const { config, state, repo } = params;
   const project = config.projects?.[normalizeRepoKey(repo)] as ProjectConfig | undefined;
   if (!project) return;
 
@@ -465,6 +505,7 @@ async function pollProject(config: ReviewFluxConfig, state: DaemonState, repo: s
           repo,
           prNumber: pr.number,
           reason: resolveReasonForPrAction(project, "opened"),
+          globalAgentsGuidance: params.globalAgentsGuidance,
         });
       }
       projectState.prHeads[prNum] = pr.head.sha;
@@ -479,6 +520,7 @@ async function pollProject(config: ReviewFluxConfig, state: DaemonState, repo: s
           repo,
           prNumber: pr.number,
           reason: resolveReasonForPrAction(project, "synchronize"),
+          globalAgentsGuidance: params.globalAgentsGuidance,
         });
       }
       projectState.prHeads[prNum] = pr.head.sha;
@@ -511,6 +553,7 @@ async function pollProject(config: ReviewFluxConfig, state: DaemonState, repo: s
       repo,
       prNumber: issue.number,
       reason: "manual_force",
+      globalAgentsGuidance: params.globalAgentsGuidance,
     });
     trackSeenCommentId(projectState, seenId);
   }
@@ -530,6 +573,7 @@ async function pollProject(config: ReviewFluxConfig, state: DaemonState, repo: s
       repo,
       prNumber,
       reason: "manual_force",
+      globalAgentsGuidance: params.globalAgentsGuidance,
     });
     trackSeenCommentId(projectState, seenId);
   }
@@ -542,6 +586,7 @@ async function assertGhReady(): Promise<void> {
 
 export async function runDaemonStartCommand(): Promise<void> {
   const config = loadConfig();
+  const globalAgentsGuidance = loadGlobalAgentsGuidance();
   const projects = Object.values(config.projects ?? {}).sort((a, b) => a.repo.localeCompare(b.repo));
 
   console.log("[reviewflux] daemon start");
@@ -556,9 +601,9 @@ export async function runDaemonStartCommand(): Promise<void> {
   console.log(`[reviewflux] gh polling mode enabled (${POLL_INTERVAL_MS}ms)`);
   console.log(`[reviewflux] tracking ${projects.length} project(s)`);
   for (const project of projects) {
-    const modelAlias = project.modelAlias ?? "<default>";
+    const modelValue = project.model ? `${project.model.provider}/${project.model.model}` : (project.modelAlias ?? "<default>");
     const contextInfo = project.context?.mode === "custom" ? `custom:${(project.context.include ?? []).join(",")}` : "default:AGENTS.md";
-    console.log(`- ${project.repo} | mode=${project.pr.mode} | model=${modelAlias} | context=${contextInfo}`);
+    console.log(`- ${project.repo} | mode=${project.pr.mode} | model=${modelValue} | context=${contextInfo}`);
   }
   console.log(`[reviewflux] force command is always enabled: ${FORCE_COMMAND}`);
 
@@ -576,7 +621,12 @@ export async function runDaemonStartCommand(): Promise<void> {
   while (!abortController.signal.aborted) {
     for (const project of projects) {
       try {
-        await pollProject(config, state, project.repo);
+        await pollProject({
+          config,
+          state,
+          repo: project.repo,
+          globalAgentsGuidance,
+        });
       } catch (error) {
         console.error(`[reviewflux] polling failed for ${project.repo}`);
         console.error(error instanceof Error ? error.message : String(error));

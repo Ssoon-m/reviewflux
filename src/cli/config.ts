@@ -54,6 +54,7 @@ export type ReviewFluxConfig = {
       repo: string;
       workspaceDir?: string;
       modelAlias?: string;
+      model?: { provider: LlmProvider; model: string };
       pr: {
         mode: "opened_once" | "on_push";
         forceCommand: "@reviewflux";
@@ -113,15 +114,14 @@ function writeConfigFile(path: string, config: Omit<ReviewFluxConfig, "auth" | "
 function writeAuthStoreFile(params: {
   authPath: string;
   auth?: ReviewFluxConfig["auth"];
-  oauth?: ReviewFluxConfig["oauth"];
   apiKey?: ReviewFluxConfig["apiKey"];
 }): void {
   const profiles = params.auth?.profiles;
   const hasProfiles = !!profiles && Object.keys(profiles).length > 0;
-  const hasOauth = !!params.oauth?.accessToken;
+  const hasOrder = !!params.auth?.order && Object.keys(params.auth.order).length > 0;
   const hasApiKey = !!params.apiKey?.key?.trim();
 
-  if (!hasProfiles && !hasOauth && !hasApiKey) {
+  if (!hasProfiles && !hasOrder && !hasApiKey) {
     if (existsSync(params.authPath)) unlinkSync(params.authPath);
     return;
   }
@@ -130,7 +130,6 @@ function writeAuthStoreFile(params: {
     version: 1,
     ...(hasProfiles ? { profiles } : {}),
     ...(params.auth?.order ? { order: params.auth.order } : {}),
-    ...(hasOauth ? { oauth: params.oauth } : {}),
     ...(hasApiKey ? { apiKey: params.apiKey } : {}),
   };
 
@@ -145,7 +144,7 @@ export function saveConfig(config: ReviewFluxConfig, home: string = homedir()): 
 
   const { auth, oauth, apiKey, ...configWithoutSecrets } = config;
 
-  writeAuthStoreFile({ authPath, auth, oauth, apiKey });
+  writeAuthStoreFile({ authPath, auth, apiKey });
   writeConfigFile(path, configWithoutSecrets);
 
   return path;
@@ -167,16 +166,31 @@ function readAuthStore(
 
   if (!profiles && !order && !oauth && !apiKey) return undefined;
 
+  const normalizedProfiles = { ...(profiles ?? {}) };
+  const normalizedOrder = { ...(order ?? {}) };
+
+  if ((!profiles || Object.keys(profiles).length === 0) && oauth?.accessToken) {
+    const providerId = oauth.oauthProviderId?.trim();
+    if (providerId) {
+      const profileId = `${providerId}:default`;
+      normalizedProfiles[profileId] = {
+        provider: providerId,
+        mode: "oauth",
+        oauth,
+      };
+      normalizedOrder[providerId] = [profileId];
+    }
+  }
+
   return {
-    ...(profiles || order
+    ...(Object.keys(normalizedProfiles).length > 0 || Object.keys(normalizedOrder).length > 0
       ? {
           auth: {
-            profiles: profiles ?? {},
-            ...(order ? { order } : {}),
+            profiles: normalizedProfiles,
+            ...(Object.keys(normalizedOrder).length > 0 ? { order: normalizedOrder } : {}),
           },
         }
       : {}),
-    ...(oauth ? { oauth } : {}),
     ...(apiKey ? { apiKey } : {}),
   };
 }
@@ -207,11 +221,20 @@ export function loadConfig(home: string = homedir()): ReviewFluxConfig {
     writeAuthStoreFile({
       authPath: getAuthStorePath(home),
       auth: parsed.auth,
-      oauth: parsed.oauth,
       apiKey: parsed.apiKey,
     });
     const { auth: _auth, oauth: _oauth, apiKey: _apiKey, ...publicConfig } = parsed;
     writeConfigFile(path, publicConfig);
+
+    const migratedAuthStore = readAuthStore(home);
+    if (migratedAuthStore) {
+      return {
+        ...publicConfig,
+        ...migratedAuthStore,
+      };
+    }
+
+    return publicConfig as ReviewFluxConfig;
   }
 
   return parsed;
