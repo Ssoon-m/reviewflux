@@ -25,9 +25,14 @@ export type PrEventDecision = {
   force: boolean;
 };
 
-function hasForceCommand(commentBody?: string): boolean {
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function hasForceCommand(commentBody: string | undefined, forceCommand: string): boolean {
   if (!commentBody) return false;
-  return /(^|\s)@reviewflux\b/i.test(commentBody);
+  const pattern = new RegExp(`(^|\\s)${escapeRegExp(forceCommand)}\\b`, "i");
+  return pattern.test(commentBody);
 }
 
 function isPullRequestTrigger(
@@ -54,7 +59,8 @@ export function decidePrReview(
     };
   }
 
-  const force = hasForceCommand(input.commentBody);
+  const forceCommand = project.pr.forceCommand?.trim() || "@reviewflux";
+  const force = hasForceCommand(input.commentBody, forceCommand);
   if (
     force &&
     (input.eventName === "issue_comment" ||

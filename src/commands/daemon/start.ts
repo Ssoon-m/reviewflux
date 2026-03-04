@@ -1,14 +1,15 @@
 import { execFile } from "node:child_process";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { getModel } from "@mariozechner/pi-ai";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { setTimeout as wait } from "node:timers/promises";
 import { apiKeyFromPiOAuth, refreshWithPiOAuth } from "../../auth/pi-oauth.js";
 import { getActiveAuthProfile, loadConfig, saveConfig, type ReviewFluxConfig } from "../../cli/config.js";
 import { createLlmProvider } from "../../llm/factory.js";
 import { normalizeRepoKey } from "../../llm/model-routing.js";
 import { buildProjectContextText, pickContextFilePaths, resolveContextPatterns, type ContextFile } from "../../llm/project-context.js";
+import { resolveCodexEffort } from "../../llm/reasoning-effort.js";
 
 type PullRequestSummary = {
   number: number;
@@ -23,6 +24,7 @@ type PullRequestDetail = {
   body?: string;
   html_url: string;
   head: { sha: string };
+  base: { sha: string };
 };
 
 type IssueComment = {
@@ -83,8 +85,15 @@ type GitHubContentsFile = {
 };
 
 const FORCE_COMMAND = "@reviewflux";
-const POLL_INTERVAL_MS = Number(process.env.REVIEWFLUX_POLL_INTERVAL_MS ?? "30000");
 const MAX_DIFF_CHARS = 18000;
+
+function resolvePollIntervalMs(raw: string | undefined): number {
+  const parsed = Number.parseInt(raw ?? "", 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) return 30_000;
+  return Math.max(parsed, 5_000);
+}
+
+const POLL_INTERVAL_MS = resolvePollIntervalMs(process.env.REVIEWFLUX_POLL_INTERVAL_MS);
 
 function daemonStatePath(home: string = homedir()): string {
   return join(home, ".reviewflux", "daemon-state.json");
@@ -107,7 +116,9 @@ function loadDaemonState(home: string = homedir()): DaemonState {
 }
 
 function saveDaemonState(state: DaemonState, home: string = homedir()): void {
-  writeFileSync(daemonStatePath(home), `${JSON.stringify(state, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+  const path = daemonStatePath(home);
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, `${JSON.stringify(state, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
 }
 
 function parseOwnerRepo(repo: string): { owner: string; name: string } {
@@ -121,7 +132,7 @@ function parseOwnerRepo(repo: string): { owner: string; name: string } {
 
 function ghExec(args: string[]): Promise<string> {
   return new Promise((resolve, reject) => {
-    execFile("gh", args, { encoding: "utf8", maxBuffer: 4 * 1024 * 1024 }, (error, stdout, stderr) => {
+    execFile("gh", args, { encoding: "utf8", maxBuffer: 16 * 1024 * 1024 }, (error, stdout, stderr) => {
       if (error) {
         reject(new Error(stderr.trim() || error.message));
         return;
@@ -141,6 +152,21 @@ function encodeGitHubApiPath(path: string): string {
 async function ghApiJson<T>(path: string): Promise<T> {
   const output = await ghExec(["api", path]);
   return JSON.parse(output) as T;
+}
+
+async function ghApiPaginatedJson<T>(path: string): Promise<T[]> {
+  const entries: T[] = [];
+  let page = 1;
+
+  while (true) {
+    const separator = path.includes("?") ? "&" : "?";
+    const pageEntries = await ghApiJson<T[]>(`${path}${separator}per_page=100&page=${page}`);
+    entries.push(...pageEntries);
+    if (pageEntries.length < 100) break;
+    page += 1;
+  }
+
+  return entries;
 }
 
 async function listRepoMarkdownPaths(repo: string, ref: string): Promise<string[]> {
@@ -179,9 +205,14 @@ async function buildRemoteProjectContextText(project: ProjectConfig, ref: string
   });
 }
 
-function containsForceCommand(body?: string): boolean {
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function containsForceCommand(body: string | undefined, forceCommand: string = FORCE_COMMAND): boolean {
   if (!body) return false;
-  return /(^|\s)@reviewflux\b/i.test(body);
+  const pattern = new RegExp(`(^|\\s)${escapeRegExp(forceCommand)}\\b`, "i");
+  return pattern.test(body);
 }
 
 function parseIssueNumberFromIssueUrl(issueUrl: string): number | null {
@@ -231,6 +262,9 @@ function resolveReasonForPrAction(project: ProjectConfig, action: "opened" | "sy
 
 function resolveProjectModel(config: ReviewFluxConfig, project: ProjectConfig): { provider: string; model: string } {
   const alias = project.modelAlias;
+  if (alias && !config.modelAliases?.[alias]) {
+    throw new Error(`project_model_alias_not_found:${project.repo}:${alias}`);
+  }
   if (alias && config.modelAliases?.[alias]) {
     return {
       provider: config.modelAliases[alias].provider,
@@ -332,12 +366,21 @@ async function createReviewComment(params: {
 
   const fallbackModel = getModel(provider as never, model as never);
   const baseUrl = provider === params.config.llm ? params.config.llmApiBaseUrl.replace(/\/$/, "") : (fallbackModel?.baseUrl ?? params.config.llmApiBaseUrl.replace(/\/$/, ""));
+  const reasoningEffort =
+    provider === "openai" || provider === "openai-codex"
+      ? resolveCodexEffort({
+          authMode: provider === "openai-codex" ? "oauth" : "apikey",
+          model,
+          requested: params.config.effort,
+        })
+      : undefined;
   const client = createLlmProvider({
     authMode: "apikey",
     provider: provider as never,
     baseUrl,
     model,
     apiKey,
+    reasoningEffort,
   });
 
   return client.generateReply([
@@ -380,9 +423,9 @@ async function triggerReview(params: {
   const pr = await fetchPullRequestDetail(params.repo, params.prNumber);
   let projectContext = "";
   try {
-    projectContext = await buildRemoteProjectContextText(params.project, pr.head.sha);
+    projectContext = await buildRemoteProjectContextText(params.project, pr.base.sha);
   } catch (error) {
-    console.error(`[reviewflux] failed to load context for ${params.repo}@${pr.head.sha}`);
+    console.error(`[reviewflux] failed to load context for ${params.repo}@${pr.base.sha}`);
     console.error(error instanceof Error ? error.message : String(error));
   }
 
@@ -406,7 +449,7 @@ async function pollProject(config: ReviewFluxConfig, state: DaemonState, repo: s
   const { owner, name } = parseOwnerRepo(repo);
   const projectState = buildProjectState(state, repo);
 
-  const pulls = await ghApiJson<PullRequestSummary[]>(`repos/${owner}/${name}/pulls?state=open&per_page=100`);
+  const pulls = await ghApiPaginatedJson<PullRequestSummary>(`repos/${owner}/${name}/pulls?state=open`);
   const activeNumbers = new Set<string>();
 
   for (const pr of pulls) {
@@ -448,9 +491,11 @@ async function pollProject(config: ReviewFluxConfig, state: DaemonState, repo: s
     }
   }
 
-  const issueComments = await ghApiJson<IssueComment[]>(`repos/${owner}/${name}/issues/comments?per_page=100`);
+  const forceCommand = project.pr.forceCommand?.trim() || FORCE_COMMAND;
+
+  const issueComments = await ghApiPaginatedJson<IssueComment>(`repos/${owner}/${name}/issues/comments`);
   for (const comment of issueComments) {
-    if (!containsForceCommand(comment.body)) continue;
+    if (!containsForceCommand(comment.body, forceCommand)) continue;
     const seenId = `issue:${comment.id}`;
     if (projectState.seenForceCommentIds.includes(seenId)) continue;
 
@@ -470,9 +515,9 @@ async function pollProject(config: ReviewFluxConfig, state: DaemonState, repo: s
     trackSeenCommentId(projectState, seenId);
   }
 
-  const reviewComments = await ghApiJson<PullReviewComment[]>(`repos/${owner}/${name}/pulls/comments?per_page=100`);
+  const reviewComments = await ghApiPaginatedJson<PullReviewComment>(`repos/${owner}/${name}/pulls/comments`);
   for (const comment of reviewComments) {
-    if (!containsForceCommand(comment.body)) continue;
+    if (!containsForceCommand(comment.body, forceCommand)) continue;
     const seenId = `review:${comment.id}`;
     if (projectState.seenForceCommentIds.includes(seenId)) continue;
 

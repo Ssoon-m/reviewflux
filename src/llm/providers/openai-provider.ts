@@ -4,6 +4,7 @@ type OpenAIProviderClientOptions = {
   baseUrl: string;
   model: string;
   timeoutMs?: number;
+  reasoningEffort?: "low" | "medium" | "high" | "xhigh";
 };
 
 export class OpenAIProviderClient {
@@ -22,7 +23,12 @@ export class OpenAIProviderClient {
       const res = await this.fetchImpl(`${this.options.baseUrl.replace(/\/$/, "")}/chat/completions`, {
         method: "POST",
         headers: { "content-type": "application/json", ...authHeaders },
-        body: JSON.stringify({ model: this.options.model, messages, temperature: 0.2 }),
+        body: JSON.stringify({
+          model: this.options.model,
+          messages,
+          temperature: 0.2,
+          ...(this.options.reasoningEffort ? { reasoning_effort: this.options.reasoningEffort } : {}),
+        }),
         signal: ctrl.signal,
       });
 

@@ -124,7 +124,13 @@ export class OAuthLlmClient implements LlmProvider {
   private readonly inner: OpenAIProviderClient;
 
   constructor(
-    options: { baseUrl: string; model: string; timeoutMs?: number; tokenProvider: OAuthTokenProvider },
+    options: {
+      baseUrl: string;
+      model: string;
+      timeoutMs?: number;
+      tokenProvider: OAuthTokenProvider;
+      reasoningEffort?: "low" | "medium" | "high" | "xhigh";
+    },
     fetchImpl: typeof fetch = fetch,
   ) {
     this.inner = new OpenAIProviderClient(
@@ -143,7 +149,13 @@ export class OpenAIApiKeyLlmClient implements LlmProvider {
   private readonly inner: OpenAIProviderClient;
 
   constructor(
-    options: { baseUrl: string; model: string; timeoutMs?: number; apiKey: string },
+    options: {
+      baseUrl: string;
+      model: string;
+      timeoutMs?: number;
+      apiKey: string;
+      reasoningEffort?: "low" | "medium" | "high" | "xhigh";
+    },
     fetchImpl: typeof fetch = fetch,
   ) {
     this.inner = new OpenAIProviderClient(options, async () => ({ authorization: `Bearer ${options.apiKey}` }), fetchImpl);
@@ -198,6 +210,7 @@ export type LlmProviderFactoryInput =
       model: string;
       timeoutMs?: number;
       tokenProvider: OAuthTokenProvider;
+      reasoningEffort?: "low" | "medium" | "high" | "xhigh";
     }
   | {
       authMode: "apikey";
@@ -206,6 +219,7 @@ export type LlmProviderFactoryInput =
       model: string;
       timeoutMs?: number;
       apiKey: string;
+      reasoningEffort?: "low" | "medium" | "high" | "xhigh";
     };
 
 export function createLlmProvider(input: LlmProviderFactoryInput, fetchImpl: typeof fetch = fetch): LlmProvider {
