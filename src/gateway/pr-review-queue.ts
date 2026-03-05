@@ -4,7 +4,8 @@ import { setTimeout as wait } from "node:timers/promises";
 import type { PrEventDecision, PrEventInput } from "./pr-event-policy.js";
 
 export type PrReviewJobPayload = PrEventInput & {
-  reason: PrEventDecision["reason"];
+  prNumber: number;
+  reason: Extract<PrEventDecision["reason"], "manual_force" | "opened_once" | "on_push">;
   force: boolean;
 };
 
@@ -69,7 +70,7 @@ export function createPrReviewQueue(options: CreatePrReviewQueueOptions): PrRevi
       } catch (error) {
         logger.fail(jobId, attempt, error, payload);
         if (attempt > options.retryCount) {
-          throw error;
+          return;
         }
         await wait(options.retryDelayMs);
       }
@@ -80,7 +81,7 @@ export function createPrReviewQueue(options: CreatePrReviewQueueOptions): PrRevi
     enqueue(payload) {
       const jobId = randomUUID();
       logger.enqueue(jobId, payload);
-      void queue.add(() => runWithRetry(jobId, payload)).catch(() => {});
+      void queue.add(() => runWithRetry(jobId, payload));
       return jobId;
     },
   };

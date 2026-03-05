@@ -1241,6 +1241,28 @@ async function triggerReview(params: {
   );
 }
 
+export async function runQueuedReviewJob(params: {
+  repo: string;
+  prNumber: number;
+  reason: ReviewTriggerReason;
+}): Promise<void> {
+  const config = loadConfig();
+  const project = config.projects?.[normalizeRepoKey(params.repo)] as
+    | ProjectConfig
+    | undefined;
+  if (!project) {
+    throw new Error(`project_not_configured:${params.repo}`);
+  }
+
+  await triggerReview({
+    config,
+    project,
+    repo: params.repo,
+    prNumber: params.prNumber,
+    reason: params.reason,
+  });
+}
+
 async function pollProject(params: {
   config: ReviewFluxConfig;
   state: DaemonState;

@@ -8,11 +8,39 @@ import { loadConfig } from "../cli/config.js";
 import { decidePrReview } from "./pr-event-policy.js";
 import { createLlmService } from "../llm/service.js";
 import { createPrReviewQueue, type PrReviewJobPayload } from "./pr-review-queue.js";
+import { runQueuedReviewJob } from "../commands/daemon/start.js";
 
 export function parsePromptText(input: unknown): string | null {
   if (typeof input !== "string") return null;
   const trimmed = input.trim();
   return trimmed.length > 0 ? trimmed : null;
+}
+
+function parsePrNumber(payload: unknown): number | null {
+  if (!payload || typeof payload !== "object") return null;
+  const candidate = payload as {
+    prNumber?: unknown;
+    pull_request?: { number?: unknown };
+    issue?: { number?: unknown };
+  };
+
+  const direct =
+    typeof candidate.prNumber === "number"
+      ? candidate.prNumber
+      : typeof candidate.prNumber === "string"
+        ? Number.parseInt(candidate.prNumber, 10)
+        : Number.NaN;
+  if (Number.isInteger(direct) && direct > 0) return direct;
+
+  const nested =
+    typeof candidate.pull_request?.number === "number"
+      ? candidate.pull_request.number
+      : typeof candidate.issue?.number === "number"
+        ? candidate.issue.number
+        : Number.NaN;
+  if (Number.isInteger(nested) && nested > 0) return nested;
+
+  return null;
 }
 
 export function getClientErrorCode(_error: unknown): string {
@@ -86,8 +114,22 @@ export function createApp() {
         return res.json({ accepted: false, decision });
       }
 
+      const prNumber = parsePrNumber(req.body);
+      if (!prNumber) {
+        return res.status(400).json({ error: "pr_number_required_for_review_event" });
+      }
+
+      if (
+        decision.reason !== "manual_force" &&
+        decision.reason !== "opened_once" &&
+        decision.reason !== "on_push"
+      ) {
+        return res.status(500).json({ error: "invalid_review_reason" });
+      }
+
       const jobId = reviewQueue.enqueue({
         ...event,
+        prNumber,
         reason: decision.reason,
         force: decision.force,
       });
@@ -104,9 +146,11 @@ export function createApp() {
 }
 
 async function processPrReviewJob(payload: PrReviewJobPayload): Promise<void> {
-  console.log(
-    `[reviewflux] review job processed repo=${payload.repo} event=${payload.eventName} reason=${payload.reason} force=${payload.force}`,
-  );
+  await runQueuedReviewJob({
+    repo: payload.repo,
+    prNumber: payload.prNumber,
+    reason: payload.reason,
+  });
 }
 
 function canonicalPath(pathLike: string): string {
