@@ -129,7 +129,7 @@ type StructuredReviewOutput = {
 };
 
 type ParsedStructuredReview = {
-  body: string;
+  body: string | null;
   inlineComments: InlineReviewComment[];
 };
 
@@ -765,7 +765,6 @@ function parseStructuredReviewOutput(
 
   const bodyFromModel =
     typeof parsedObject.body === "string" ? parsedObject.body.trim() : "";
-  if (!bodyFromModel) return null;
 
   const commentsRaw = normalizeStructuredReviewComments(parsedObject);
   const inlineComments: InlineReviewComment[] = [];
@@ -792,7 +791,38 @@ function parseStructuredReviewOutput(
     });
   }
 
-  return { body: bodyFromModel, inlineComments };
+  if (!bodyFromModel && inlineComments.length === 0) return null;
+
+  return { body: bodyFromModel || null, inlineComments };
+}
+
+function buildBodyFromInlineComments(
+  inlineComments: InlineReviewComment[],
+): string {
+  const top = inlineComments.slice(0, 3).map((item) => {
+    const compact = item.body.replace(/\s+/g, " ").trim();
+    const short = compact.length > 180 ? `${compact.slice(0, 177)}...` : compact;
+    return `- ${item.path}:${item.line} ${short}`;
+  });
+
+  const summary =
+    top.length > 0
+      ? [
+          "Potential issues were detected from structured findings.",
+          ...top,
+        ].join("\n")
+      : "Potential issues were detected from structured findings.";
+
+  return [
+    "🧠 ReviewFlux Review",
+    "",
+    "### Summary",
+    summary,
+    "",
+    "### Verification Notes",
+    "- Verified: Parsed structured findings (path/line/body) from model output.",
+    "- Not Verified: Model-provided top-level body format.",
+  ].join("\n");
 }
 
 function isStrictReviewBody(body: string): boolean {
@@ -821,6 +851,39 @@ function buildContractFailureBody(reason: string): string {
   ].join("\n");
 }
 
+function sanitizeModelOutputForFallback(raw: string): string {
+  return raw
+    .replace(/```json\s*[\s\S]*?```/gi, " ")
+    .replace(/```[\s\S]*?```/g, " ")
+    .replace(/[{}\[\]"]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function buildBestEffortFallbackBody(params: {
+  raw: string;
+  reason: string;
+}): string {
+  const sanitized = sanitizeModelOutputForFallback(params.raw);
+  if (!sanitized) {
+    return buildContractFailureBody(params.reason);
+  }
+
+  const summary =
+    sanitized.length > 360 ? `${sanitized.slice(0, 357)}...` : sanitized;
+
+  return [
+    "🧠 ReviewFlux Review",
+    "",
+    "### Summary",
+    summary,
+    "",
+    "### Verification Notes",
+    "- Verified: Best-effort rendering from model output text.",
+    `- Not Verified: ${params.reason}`,
+  ].join("\n");
+}
+
 function buildReviewSystemPrompt(params: {
   repo: string;
   prNumber: number;
@@ -831,6 +894,7 @@ function buildReviewSystemPrompt(params: {
     "You are the ReviewFlux PR review assistant.",
     "Write concise, actionable review comments focused on correctness, risk, and maintainability.",
     "Output must be exactly one JSON object. Do not output markdown, explanations, or code fences.",
+    "Return valid JSON only, with no prefix/suffix text before or after the object.",
     "Follow the output contract (JSON schema) as the highest priority.",
     "If project guidance (AGENTS.md/context) is provided, apply it while preserving the output contract.",
     ...(params.basePolicyGuidance
@@ -874,8 +938,8 @@ function buildReviewUserPrompt(params: {
     truncate(params.diff, MAX_DIFF_CHARS),
     "",
     "Use the role/core principles from REVIEWFLUX-AGENTS.md provided in system prompt.",
-    "In body, follow this strict output format exactly:",
-    "## Review Output Format (Strict)",
+    "Prioritize findings JSON extraction over markdown body formatting.",
+    "## Review Output Contract",
     "- The first line must match this exact string:",
     "  - 🧠 ReviewFlux Review",
     "- Add one blank line after the first line, then follow this section order:",
@@ -912,15 +976,15 @@ function buildReviewUserPrompt(params: {
     "",
     "Use path and line only when you can confidently anchor to a changed line in the diff.",
     "If a finding is not tied to a specific line, use empty path and empty line for that finding.",
-    "Return only JSON with this schema:",
+    "Return only JSON with this schema (minimum required keys are path/line/body):",
     "{",
-    '  "body": "string",',
+    '  "body": "string (optional)",',
     '  "findings": [',
-    '    { "path": "src/file.ts", "line": 128, "severity": "Small|Medium|High", "body": "- Evidence: ...\\n- Risk: ...\\n- Recommendation: ..." },',
-    '    { "path": "", "line": "", "severity": "Small|Medium|High", "body": "- Evidence: ...\\n- Risk: ...\\n- Recommendation: ..." }',
+    '    { "path": "src/file.ts", "line": 128, "body": "- Evidence: ...\\n- Risk: ...\\n- Recommendation: ...", "severity": "Small|Medium|High (optional)" },',
+    '    { "path": "", "line": "", "body": "General finding without a line anchor", "severity": "Small|Medium|High (optional)" }',
     "  ]",
     "}",
-    "If there is no issue, return findings as an empty array and keep body in strict format.",
+    "If there is no issue, return findings as an empty array.",
     "Do not wrap JSON in code fences.",
   ].join("\n");
 }
@@ -1148,13 +1212,21 @@ async function triggerReview(params: {
   });
 
   const structured = parseStructuredReviewOutput(review.raw);
-  const fallbackBody = buildContractFailureBody(
-    "invalid model output format (expected strict JSON contract)",
-  );
-  const parsedBody =
-    structured && isStrictReviewBody(structured.body)
+  const formatFailureReason =
+    "invalid model output format (expected strict JSON contract)";
+  const parsedBody = structured?.body
+    ? isStrictReviewBody(structured.body)
       ? structured.body
-      : fallbackBody;
+      : buildBestEffortFallbackBody({
+          raw: structured.body,
+          reason: formatFailureReason,
+        })
+    : structured && structured.inlineComments.length > 0
+      ? buildBodyFromInlineComments(structured.inlineComments)
+      : buildBestEffortFallbackBody({
+          raw: review.raw,
+          reason: formatFailureReason,
+        });
 
   await postReviewOutput({
     repo: params.repo,
