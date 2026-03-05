@@ -686,10 +686,6 @@ function normalizeInlineFindingBody(params: {
   severity: FindingSeverity | null;
   baseBody: string;
 }): string {
-  if (isStrictReviewBody(params.baseBody)) {
-    return params.baseBody;
-  }
-
   const sanitized = params.baseBody
     .replace(/(^|\n)\s*-?\s*(line reference|라인 참조)\s*:[^\n]*/gi, "")
     .replace(/(^|\n)\s*-?\s*(severity|심각도)\s*:[^\n]*/gi, "")
@@ -1212,21 +1208,14 @@ async function triggerReview(params: {
   });
 
   const structured = parseStructuredReviewOutput(review.raw);
-  const formatFailureReason =
-    "invalid model output format (expected strict JSON contract)";
-  const parsedBody = structured?.body
-    ? isStrictReviewBody(structured.body)
-      ? structured.body
-      : buildBestEffortFallbackBody({
-          raw: structured.body,
-          reason: formatFailureReason,
-        })
-    : structured && structured.inlineComments.length > 0
-      ? buildBodyFromInlineComments(structured.inlineComments)
-      : buildBestEffortFallbackBody({
-          raw: review.raw,
-          reason: formatFailureReason,
-        });
+  const parsedBody = structured?.inlineComments?.length
+    ? buildBodyFromInlineComments(structured.inlineComments)
+    : buildBestEffortFallbackBody({
+        raw: structured?.body ?? review.raw,
+        reason: structured
+          ? "structured findings were empty"
+          : "invalid model output format (expected structured JSON)",
+      });
 
   await postReviewOutput({
     repo: params.repo,
