@@ -135,6 +135,7 @@ type StructuredReviewOutput = {
 type ParsedStructuredReview = {
   body: string | null;
   inlineComments: InlineReviewComment[];
+  findingBodies: string[];
 };
 
 type FindingSeverity = "Small" | "Medium" | "High";
@@ -769,11 +770,13 @@ function parseStructuredReviewOutput(
 
   const commentsRaw = normalizeStructuredReviewComments(parsedObject);
   const inlineComments: InlineReviewComment[] = [];
+  const findingBodies: string[] = [];
   for (const finding of commentsRaw) {
     const pathRaw = typeof finding.path === "string" ? finding.path.trim() : "";
     const line = parseStrictPositiveLine(finding.line);
     const body = typeof finding.body === "string" ? finding.body.trim() : "";
     if (!body) continue;
+    findingBodies.push(body);
 
     const severity = normalizeFindingSeverity(finding.severity);
     const hasLocation = pathRaw.length > 0 && line !== null;
@@ -792,9 +795,9 @@ function parseStructuredReviewOutput(
     });
   }
 
-  if (!bodyFromModel && inlineComments.length === 0) return null;
+  if (!bodyFromModel && findingBodies.length === 0) return null;
 
-  return { body: bodyFromModel || null, inlineComments };
+  return { body: bodyFromModel || null, inlineComments, findingBodies };
 }
 
 function buildBodyFromInlineComments(
@@ -824,6 +827,42 @@ function buildBodyFromInlineComments(
     "### Verification Notes",
     "- Verified: Parsed structured findings (path/line/body) from model output.",
     "- Not Verified: Model-provided top-level body format.",
+  ].join("\n");
+}
+
+function buildBodyFromGeneralFindings(findingBodies: string[]): string {
+  const top = findingBodies.slice(0, 3).map((body) => {
+    const compact = body.replace(/\s+/g, " ").trim();
+    return compact.length > 220 ? `${compact.slice(0, 217)}...` : compact;
+  });
+
+  const summary = [
+    "Potential issues were reported from structured findings.",
+    ...top.map((item) => `- ${item}`),
+  ].join("\n");
+
+  return [
+    "🧠 ReviewFlux Review",
+    "",
+    "### Summary",
+    summary,
+    "",
+    "### Verification Notes",
+    "- Verified: Parsed structured finding bodies from model output.",
+    "- Not Verified: Exact inline path/line anchors were not available.",
+  ].join("\n");
+}
+
+function buildNoIssueBody(): string {
+  return [
+    "🧠 ReviewFlux Review",
+    "",
+    "### Summary",
+    "Great news - no actionable issues were found in this PR.",
+    "",
+    "### Verification Notes",
+    "- Verified: Structured review completed without findings.",
+    "- Not Verified: Runtime behavior beyond static/diff-level review.",
   ].join("\n");
 }
 
@@ -1244,13 +1283,15 @@ async function triggerReview(params: {
   });
 
   const structured = parseStructuredReviewOutput(review.raw);
-  let parsedBody = structured?.inlineComments?.length
-    ? buildBodyFromInlineComments(structured.inlineComments)
+  let parsedBody = structured
+    ? structured.inlineComments.length > 0
+      ? buildBodyFromInlineComments(structured.inlineComments)
+      : structured.findingBodies.length > 0
+        ? buildBodyFromGeneralFindings(structured.findingBodies)
+        : buildNoIssueBody()
     : buildBestEffortFallbackBody({
-        raw: structured?.body ?? review.raw,
-        reason: structured
-          ? "structured findings were empty"
-          : "invalid model output format (expected structured JSON)",
+        raw: review.raw,
+        reason: "invalid model output format (expected structured JSON)",
       });
 
   if (params.reason === "manual_force" && params.triggerComment?.url) {
