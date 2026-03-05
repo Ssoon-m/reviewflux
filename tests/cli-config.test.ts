@@ -57,11 +57,12 @@ describe("cli-config", () => {
       oauth?: { accessToken?: string };
       profiles?: Record<string, unknown>;
     };
-    expect(savedAuthRaw.oauth?.accessToken).toBe("token");
+    expect(savedAuthRaw.oauth).toBeUndefined();
     expect(Object.keys(savedAuthRaw.profiles ?? {}).length).toBeGreaterThan(0);
 
     const loaded = loadConfig(fakeHome);
-    expect(loaded).toEqual(config);
+    expect(loaded.oauth).toBeUndefined();
+    expect(loaded.auth?.profiles?.["codex:default"]).toBeDefined();
   });
 
   it("resolves active auth profile by provider order", () => {
@@ -120,7 +121,7 @@ describe("cli-config", () => {
     writeFileSync(getConfigPath(fakeHome), `${JSON.stringify(legacyConfig, null, 2)}\n`, "utf8");
 
     const loaded = loadConfig(fakeHome);
-    expect(loaded.oauth?.accessToken).toBe("legacy-token");
+    expect(loaded.oauth).toBeUndefined();
     expect(loaded.auth?.profiles?.["openai-codex:default"]).toBeDefined();
 
     const migratedConfigRaw = JSON.parse(readFileSync(getConfigPath(fakeHome), "utf8")) as ReviewFluxConfig;
@@ -131,7 +132,7 @@ describe("cli-config", () => {
       oauth?: { accessToken?: string };
       profiles?: Record<string, unknown>;
     };
-    expect(authRaw.oauth?.accessToken).toBe("legacy-token");
+    expect(authRaw.oauth).toBeUndefined();
     expect(authRaw.profiles?.["openai-codex:default"]).toBeDefined();
   });
 

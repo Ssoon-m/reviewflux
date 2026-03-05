@@ -7,6 +7,12 @@ import {
   runDaemonStatusCommand,
   runDaemonStopCommand,
 } from "../commands/daemon/index.js";
+import {
+  runProjectAddCommand,
+  runProjectListCommand,
+  runProjectRemoveCommand,
+  runProjectSetModelCommand,
+} from "../commands/project/index.js";
 
 async function main() {
   const args = process.argv.slice(2);
@@ -45,6 +51,28 @@ async function main() {
 
   if (cmd === "daemon" && subcmd === "install") {
     await runDaemonInstallCommand();
+    return;
+  }
+
+  if (cmd === "project" && subcmd === "add") {
+    await runProjectAddCommand();
+    process.exit(0);
+    return;
+  }
+
+  if (cmd === "project" && subcmd === "list") {
+    await runProjectListCommand();
+    return;
+  }
+
+  if (cmd === "project" && subcmd === "remove") {
+    await runProjectRemoveCommand();
+    return;
+  }
+
+  if (cmd === "project" && subcmd === "set-model") {
+    await runProjectSetModelCommand();
+    process.exit(0);
     return;
   }
 
