@@ -28,8 +28,7 @@
   "homepage": "https://github.com/Ssoon-m/issue-flow-ai#readme",
   "dependencies": {
     "@clack/prompts": "^0.11.0",
-    "@mariozechner/pi-agent-core": "0.55.1",
-    "@mariozechner/pi-ai": "0.55.1",
+    "@mariozechner/pi-ai": "0.56.2",
     "dotenv": "^17.3.1",
     "express": "^5.2.1",
     "p-queue": "^9.1.0",

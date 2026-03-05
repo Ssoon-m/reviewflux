@@ -5,9 +5,8 @@ import { fileURLToPath } from "node:url";
 import {
   getModel,
   getModels,
-  getOAuthProvider,
-  getOAuthProviders,
 } from "@mariozechner/pi-ai";
+import { getOAuthProvider, getOAuthProviders } from "@mariozechner/pi-ai/oauth";
 import {
   promptPassword,
   promptSelect,
