@@ -892,7 +892,10 @@ function sanitizeModelOutputForFallback(raw: string): string {
 
 function resolveFallbackSourceText(raw: string): string {
   const payload = extractJsonPayload(raw);
-  if (!payload) return raw;
+  if (!payload) {
+    const looseFromRaw = extractLooseBodyText(raw);
+    return looseFromRaw ?? raw;
+  }
 
   try {
     const parsed = JSON.parse(payload) as {
@@ -917,10 +920,30 @@ function resolveFallbackSourceText(raw: string): string {
       }
     }
   } catch {
-    return payload;
+    const looseFromPayload = extractLooseBodyText(payload);
+    return looseFromPayload ?? payload;
   }
 
-  return payload;
+  const looseFromPayload = extractLooseBodyText(payload);
+  return looseFromPayload ?? payload;
+}
+
+function extractLooseBodyText(input: string): string | null {
+  const bodyMatch = input.match(
+    /["']?body["']?\s*:\s*([\s\S]*?)(?:,\s*["']?findings["']?\s*:|\}\s*$|$)/i,
+  );
+  if (!bodyMatch?.[1]) return null;
+
+  const rawValue = bodyMatch[1].trim();
+  if (!rawValue) return null;
+
+  const unwrapped = rawValue.replace(/^["']|["']$/g, "").trim();
+  return unwrapped
+    .replace(/\\n/g, "\n")
+    .replace(/\\t/g, "\t")
+    .replace(/\\"/g, '"')
+    .replace(/\\\\/g, "\\")
+    .trim();
 }
 
 function buildBestEffortFallbackBody(params: {
