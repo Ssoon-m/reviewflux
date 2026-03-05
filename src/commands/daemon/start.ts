@@ -704,8 +704,7 @@ function normalizeInlineFindingBody(params: {
 
   const hasEvidence = /(^|\n)\s*-\s*Evidence\s*:/i.test(sanitized);
   const hasRisk = /(^|\n)\s*-\s*Risk\s*:/i.test(sanitized);
-  const hasRecommendation =
-    /(^|\n)\s*-\s*Recommendation\s*:/i.test(sanitized);
+  const hasRecommendation = /(^|\n)\s*-\s*Recommendation\s*:/i.test(sanitized);
   const structuredDetails =
     hasEvidence && hasRisk && hasRecommendation
       ? sanitized
@@ -759,7 +758,9 @@ function parseStructuredReviewOutput(
   }
 
   const parsedObject: StructuredReviewOutput =
-    parsedValue && typeof parsedValue === "object" && !Array.isArray(parsedValue)
+    parsedValue &&
+    typeof parsedValue === "object" &&
+    !Array.isArray(parsedValue)
       ? (parsedValue as StructuredReviewOutput)
       : {};
 
@@ -801,7 +802,8 @@ function buildBodyFromInlineComments(
 ): string {
   const top = inlineComments.slice(0, 3).map((item) => {
     const compact = item.body.replace(/\s+/g, " ").trim();
-    const short = compact.length > 180 ? `${compact.slice(0, 177)}...` : compact;
+    const short =
+      compact.length > 180 ? `${compact.slice(0, 177)}...` : compact;
     return `- ${item.path}:${item.line} ${short}`;
   });
 
@@ -840,13 +842,46 @@ function isStrictReviewBody(body: string): boolean {
 }
 
 function sanitizeModelOutputForFallback(raw: string): string {
-  const source = extractJsonPayload(raw) ?? raw;
+  const source = resolveFallbackSourceText(raw);
   return source
     .replace(/```json/gi, " ")
     .replace(/```/g, " ")
     .replace(/[{}\[\]"]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function resolveFallbackSourceText(raw: string): string {
+  const payload = extractJsonPayload(raw);
+  if (!payload) return raw;
+
+  try {
+    const parsed = JSON.parse(payload) as {
+      body?: unknown;
+      findings?: unknown;
+    };
+
+    if (typeof parsed.body === "string" && parsed.body.trim().length > 0) {
+      return parsed.body.trim();
+    }
+
+    if (Array.isArray(parsed.findings)) {
+      const findingBodies = parsed.findings
+        .map((item) => {
+          if (!item || typeof item !== "object") return "";
+          const finding = item as { body?: unknown };
+          return typeof finding.body === "string" ? finding.body.trim() : "";
+        })
+        .filter((text) => text.length > 0);
+      if (findingBodies.length > 0) {
+        return findingBodies.join("\n");
+      }
+    }
+  } catch {
+    return payload;
+  }
+
+  return payload;
 }
 
 function buildBestEffortFallbackBody(params: {
@@ -915,7 +950,11 @@ function buildReviewUserPrompt(params: {
         ]
       : []),
     ...(params.projectContext
-      ? ["Registered project AGENTS/context markdown:", params.projectContext, ""]
+      ? [
+          "Registered project AGENTS/context markdown:",
+          params.projectContext,
+          "",
+        ]
       : []),
     `PR title: ${params.pr.title}`,
     `PR URL: ${params.pr.html_url}`,
@@ -1352,10 +1391,6 @@ async function pollProject(params: {
       repo,
       prNumber: issue.number,
       reason: "manual_force",
-      triggerComment: {
-        url: comment.html_url,
-        author: comment.user?.login,
-      },
     });
     trackSeenCommentId(projectState, seenId);
   }
@@ -1377,10 +1412,6 @@ async function pollProject(params: {
       repo,
       prNumber,
       reason: "manual_force",
-      triggerComment: {
-        url: comment.html_url,
-        author: comment.user?.login,
-      },
     });
     trackSeenCommentId(projectState, seenId);
   }
