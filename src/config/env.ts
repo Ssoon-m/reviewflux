@@ -3,7 +3,7 @@ import { z } from "zod";
 const schema = z
   .object({
     LLM_PROVIDER: z.string().default("openai"),
-    LLM_AUTH_MODE: z.enum(["oauth", "apikey"]).default("oauth"),
+    LLM_AUTH_MODE: z.enum(["oauth", "apikey"]).default("apikey"),
     LLM_API_KEY: z.string().optional(),
     LLM_MODEL_ALIASES_JSON: z.string().optional(),
     LLM_ALLOWED_MODELS: z.string().optional(),
@@ -14,7 +14,7 @@ const schema = z
     OAUTH_SCOPE: z.string().optional(),
     OAUTH_AUDIENCE: z.string().optional(),
 
-    LLM_API_BASE_URL: z.string().url(),
+    LLM_API_BASE_URL: z.string().url().default("https://api.openai.com/v1"),
     LLM_MODEL: z.string().optional(),
     LLM_TIMEOUT_MS: z.coerce.number().default(30_000),
     PORT: z.coerce.number().default(3000),

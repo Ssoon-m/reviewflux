@@ -21,7 +21,7 @@ export function getClientErrorCode(_error: unknown): string {
 
 export function createApp() {
   const config = readConfig();
-  const llm = createLlmService(config);
+  let llm = null as ReturnType<typeof createLlmService> | null;
   const reviewQueue = createPrReviewQueue({
     concurrency: config.EVENT_QUEUE_CONCURRENCY,
     retryCount: config.EVENT_QUEUE_RETRY_COUNT,
@@ -40,6 +40,10 @@ export function createApp() {
     try {
       const prompt = parsePromptText(req.body?.text);
       if (!prompt) return res.status(400).json({ error: "text_must_be_non_empty_string" });
+
+      if (!llm) {
+        llm = createLlmService(config);
+      }
 
       const answer = await llm.generateReply([
         { role: "system", content: "You are an assistant for issue-flow-ai." },
