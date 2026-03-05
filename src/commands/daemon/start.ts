@@ -55,12 +55,16 @@ type IssueComment = {
   id: number;
   body?: string;
   issue_url: string;
+  html_url?: string;
+  user?: { login?: string };
 };
 
 type PullReviewComment = {
   id: number;
   body?: string;
   pull_request_url: string;
+  html_url?: string;
+  user?: { login?: string };
 };
 
 type IssueInfo = {
@@ -835,22 +839,11 @@ function isStrictReviewBody(body: string): boolean {
   return summaryIndex < verificationIndex;
 }
 
-function buildContractFailureBody(reason: string): string {
-  return [
-    "🧠 ReviewFlux Review",
-    "",
-    "### Summary",
-    "Review output format validation failed.",
-    "",
-    "### Verification Notes",
-    `- Not Verified: ${reason}`,
-  ].join("\n");
-}
-
 function sanitizeModelOutputForFallback(raw: string): string {
-  return raw
-    .replace(/```json\s*[\s\S]*?```/gi, " ")
-    .replace(/```[\s\S]*?```/g, " ")
+  const source = extractJsonPayload(raw) ?? raw;
+  return source
+    .replace(/```json/gi, " ")
+    .replace(/```/g, " ")
     .replace(/[{}\[\]"]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
@@ -861,12 +854,12 @@ function buildBestEffortFallbackBody(params: {
   reason: string;
 }): string {
   const sanitized = sanitizeModelOutputForFallback(params.raw);
-  if (!sanitized) {
-    return buildContractFailureBody(params.reason);
-  }
-
   const summary =
-    sanitized.length > 360 ? `${sanitized.slice(0, 357)}...` : sanitized;
+    sanitized.length > 0
+      ? sanitized.length > 360
+        ? `${sanitized.slice(0, 357)}...`
+        : sanitized
+      : "Review generation completed, but model output did not contain parsable analysis text.";
 
   return [
     "🧠 ReviewFlux Review",
@@ -1179,6 +1172,10 @@ async function triggerReview(params: {
   repo: string;
   prNumber: number;
   reason: ReviewTriggerReason;
+  triggerComment?: {
+    url?: string;
+    author?: string;
+  };
 }): Promise<void> {
   const basePolicyGuidance = loadBasePolicyGuidance();
   const globalAgentsGuidance = loadGlobalAgentsGuidance();
@@ -1208,7 +1205,7 @@ async function triggerReview(params: {
   });
 
   const structured = parseStructuredReviewOutput(review.raw);
-  const parsedBody = structured?.inlineComments?.length
+  let parsedBody = structured?.inlineComments?.length
     ? buildBodyFromInlineComments(structured.inlineComments)
     : buildBestEffortFallbackBody({
         raw: structured?.body ?? review.raw,
@@ -1216,6 +1213,17 @@ async function triggerReview(params: {
           ? "structured findings were empty"
           : "invalid model output format (expected structured JSON)",
       });
+
+  if (params.reason === "manual_force" && params.triggerComment?.url) {
+    const triggerAuthor = params.triggerComment.author?.trim();
+    const triggerPrefix = triggerAuthor
+      ? `Requested by @${triggerAuthor}: ${params.triggerComment.url}`
+      : `Requested via trigger comment: ${params.triggerComment.url}`;
+    parsedBody = parsedBody.replace(
+      "### Summary\n",
+      `### Summary\n${triggerPrefix}\n\n`,
+    );
+  }
 
   await postReviewOutput({
     repo: params.repo,
@@ -1344,6 +1352,10 @@ async function pollProject(params: {
       repo,
       prNumber: issue.number,
       reason: "manual_force",
+      triggerComment: {
+        url: comment.html_url,
+        author: comment.user?.login,
+      },
     });
     trackSeenCommentId(projectState, seenId);
   }
@@ -1365,6 +1377,10 @@ async function pollProject(params: {
       repo,
       prNumber,
       reason: "manual_force",
+      triggerComment: {
+        url: comment.html_url,
+        author: comment.user?.login,
+      },
     });
     trackSeenCommentId(projectState, seenId);
   }
