@@ -58,18 +58,15 @@ function globalAgentsPath(home: string): string {
 
 function embeddedGlobalAgentsTemplate(): string {
   return [
-    "# ReviewFlux 리뷰 에이전트 정책 (fallback)",
+    "# ReviewFlux Global Review Guidance (fallback)",
     "",
-    "이 파일은 setup 기본 템플릿 파일(REVIEWFLUX-AGENTS.md)을 찾지 못했을 때만 사용됩니다.",
+    "This fallback is used only when REVIEWFLUX-AGENTS.md cannot be found during setup.",
     "",
-    "🧠 ReviewFlux Review",
-    "",
-    "### 요약",
-    "- 전체 판단을 2-4줄로 작성한다.",
-    "",
-    "### 검증 메모",
-    "- Verified: 확인한 항목",
-    "- Not Verified: 확인하지 못한 항목과 이유",
+    "Add your team-specific review guidance here.",
+    "Example topics:",
+    "- Scope boundaries",
+    "- Severity definitions",
+    "- Required verification steps",
     "",
   ].join("\n");
 }

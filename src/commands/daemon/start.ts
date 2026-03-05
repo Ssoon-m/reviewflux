@@ -10,6 +10,7 @@ import {
 } from "node:fs";
 import { getModel } from "@mariozechner/pi-ai";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { setTimeout as wait } from "node:timers/promises";
 import { apiKeyFromPiOAuth, refreshWithPiOAuth } from "../../auth/pi-oauth.js";
 import {
@@ -115,7 +116,7 @@ type PullRequestFile = {
 
 type DiffLineIndex = Map<string, number[]>;
 
-type StructuredReviewFinding = {
+type StructuredReviewComment = {
   path?: unknown;
   line?: unknown;
   severity?: unknown;
@@ -123,17 +124,22 @@ type StructuredReviewFinding = {
 };
 
 type StructuredReviewOutput = {
-  summary?: unknown;
-  verificationNotes?: {
-    verified?: unknown;
-    notVerified?: unknown;
-  };
+  body?: unknown;
   findings?: unknown;
 };
+
+type ParsedStructuredReview = {
+  body: string;
+  inlineComments: InlineReviewComment[];
+};
+
+type FindingSeverity = "Small" | "Medium" | "High";
 
 const FORCE_COMMAND = "@reviewflux";
 const MAX_DIFF_CHARS = 18000;
 const MAX_GLOBAL_AGENTS_CHARS = 6000;
+const MAX_BASE_POLICY_CHARS = 6000;
+const BASE_POLICY_FILE = "REVIEWFLUX-AGENTS.md";
 
 function resolvePollIntervalMs(raw: string | undefined): number {
   const parsed = Number.parseInt(raw ?? "", 10);
@@ -151,6 +157,38 @@ function daemonStatePath(home: string = homedir()): string {
 
 function globalAgentsPath(home: string = homedir()): string {
   return join(home, ".reviewflux", "AGENTS.md");
+}
+
+function loadBasePolicyGuidance(): string {
+  const moduleDir = fileURLToPath(new URL(".", import.meta.url));
+  const candidates = [
+    join(process.cwd(), "src", "commands", "setup", BASE_POLICY_FILE),
+    join(process.cwd(), BASE_POLICY_FILE),
+    join(moduleDir, "..", "setup", BASE_POLICY_FILE),
+    join(
+      moduleDir,
+      "..",
+      "..",
+      "..",
+      "src",
+      "commands",
+      "setup",
+      BASE_POLICY_FILE,
+    ),
+    join(moduleDir, "..", "..", BASE_POLICY_FILE),
+  ];
+
+  for (const path of candidates) {
+    if (!existsSync(path)) continue;
+    try {
+      const content = readFileSync(path, "utf8").trim();
+      if (content) return content.slice(0, MAX_BASE_POLICY_CHARS);
+    } catch {
+      continue;
+    }
+  }
+
+  return "";
 }
 
 function loadGlobalAgentsGuidance(home: string = homedir()): string {
@@ -311,7 +349,10 @@ async function buildRemoteProjectContextText(
   ref: string,
 ): Promise<string> {
   const markdownPaths = await listRepoMarkdownPaths(project.repo, ref);
-  const patterns = resolveContextPatterns(project.context);
+  const configuredPatterns = resolveContextPatterns(project.context);
+  const patterns = Array.from(
+    new Set(["AGENTS.md", "**/AGENTS.md", ...configuredPatterns]),
+  );
   const selectedPaths = pickContextFilePaths({
     filePaths: markdownPaths,
     patterns,
@@ -325,7 +366,10 @@ async function buildRemoteProjectContextText(
   }
 
   return buildProjectContextText({
-    context: project.context,
+    context: {
+      mode: "custom",
+      include: patterns,
+    },
     files,
   });
 }
@@ -584,29 +628,12 @@ function resolveClosestCommentableLine(
   path: string,
   requestedLine: number,
 ): number | null {
+  if (!Number.isFinite(requestedLine) || requestedLine <= 0) return null;
+
   const lines = lineIndex.get(path);
   if (!lines || lines.length === 0) return null;
   if (lines.includes(requestedLine)) return requestedLine;
-
-  let best = lines[0] ?? null;
-  let bestDistance =
-    best === null ? Number.POSITIVE_INFINITY : Math.abs(best - requestedLine);
-  for (const line of lines) {
-    const distance = Math.abs(line - requestedLine);
-    if (distance < bestDistance) {
-      best = line;
-      bestDistance = distance;
-    }
-  }
-
-  return best;
-}
-
-function normalizeStringArray(value: unknown): string[] {
-  if (!Array.isArray(value)) return [];
-  return value
-    .map((entry) => (typeof entry === "string" ? entry.trim() : ""))
-    .filter(Boolean);
+  return null;
 }
 
 function extractJsonPayload(raw: string): string | null {
@@ -620,6 +647,12 @@ function extractJsonPayload(raw: string): string | null {
   const trimmed = raw.trim();
   if (trimmed.startsWith("{") || trimmed.startsWith("[")) return trimmed;
 
+  const firstBracket = raw.indexOf("[");
+  const lastBracket = raw.lastIndexOf("]");
+  if (firstBracket >= 0 && lastBracket > firstBracket) {
+    return raw.slice(firstBracket, lastBracket + 1).trim();
+  }
+
   const firstBrace = raw.indexOf("{");
   const lastBrace = raw.lastIndexOf("}");
   if (firstBrace >= 0 && lastBrace > firstBrace) {
@@ -629,33 +662,92 @@ function extractJsonPayload(raw: string): string | null {
   return null;
 }
 
-function buildSummaryBodyFromStructured(
-  parsed: StructuredReviewOutput,
-): string {
-  const summaryText =
-    typeof parsed.summary === "string" && parsed.summary.trim()
-      ? parsed.summary.trim()
-      : "중대한 수정 필요 없음";
-  const verified = normalizeStringArray(parsed.verificationNotes?.verified);
-  const notVerified = normalizeStringArray(
-    parsed.verificationNotes?.notVerified,
-  );
+function normalizeStructuredReviewComments(
+  parsedObject: StructuredReviewOutput,
+): StructuredReviewComment[] {
+  if (Array.isArray(parsedObject.findings)) {
+    return parsedObject.findings as StructuredReviewComment[];
+  }
+  return [];
+}
+
+function normalizeFindingSeverity(value: unknown): FindingSeverity | null {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "small") return "Small";
+  if (normalized === "medium") return "Medium";
+  if (normalized === "high") return "High";
+  return null;
+}
+
+function normalizeInlineFindingBody(params: {
+  path: string;
+  line: number;
+  severity: FindingSeverity | null;
+  baseBody: string;
+}): string {
+  if (isStrictReviewBody(params.baseBody)) {
+    return params.baseBody;
+  }
+
+  const sanitized = params.baseBody
+    .replace(/(^|\n)\s*-?\s*(line reference|라인 참조)\s*:[^\n]*/gi, "")
+    .replace(/(^|\n)\s*-?\s*(severity|심각도)\s*:[^\n]*/gi, "")
+    .trim();
+
+  const compact = sanitized.replace(/\s+/g, " ").trim();
+  const summary = compact
+    ? compact.length > 180
+      ? `${compact.slice(0, 177)}...`
+      : compact
+    : "Line-level issue detected in the referenced diff.";
+
+  const hasEvidence = /(^|\n)\s*-\s*Evidence\s*:/i.test(sanitized);
+  const hasRisk = /(^|\n)\s*-\s*Risk\s*:/i.test(sanitized);
+  const hasRecommendation =
+    /(^|\n)\s*-\s*Recommendation\s*:/i.test(sanitized);
+  const structuredDetails =
+    hasEvidence && hasRisk && hasRecommendation
+      ? sanitized
+      : [
+          `- Evidence: ${compact || "Potential issue identified in the referenced line."}`,
+          "- Risk: The current implementation can introduce incorrect behavior or maintenance risk.",
+          "- Recommendation: Revisit this line-level logic and apply a targeted fix.",
+        ].join("\n");
 
   return [
     "🧠 ReviewFlux Review",
     "",
-    "### 요약",
-    `- ${summaryText}`,
+    "### Summary",
+    summary,
     "",
-    "### 검증 메모",
-    `- Verified: ${verified.length > 0 ? verified.join("; ") : "없음"}`,
-    `- Not Verified: ${notVerified.length > 0 ? notVerified.join("; ") : "없음"}`,
+    "### Findings (ordered by severity)",
+    "",
+    `- Severity: [${params.severity ?? "Medium"}]`,
+    structuredDetails,
+    "",
+    "### Verification Notes",
+    "- Verified: Static review of the referenced diff line.",
+    "- Not Verified: Runtime execution and full integration behavior were not validated in this inline context.",
   ].join("\n");
+}
+
+function parseStrictPositiveLine(value: unknown): number | null {
+  if (typeof value === "number") {
+    return Number.isInteger(value) && value > 0 ? value : null;
+  }
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!/^\d+$/.test(trimmed)) return null;
+    const parsed = Number.parseInt(trimmed, 10);
+    return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+  }
+  return null;
 }
 
 function parseStructuredReviewOutput(
   raw: string,
-): { body: string; inlineComments: InlineReviewComment[] } | null {
+): ParsedStructuredReview | null {
   const payload = extractJsonPayload(raw);
   if (!payload) return null;
 
@@ -666,47 +758,74 @@ function parseStructuredReviewOutput(
     return null;
   }
 
-  if (!parsedValue || typeof parsedValue !== "object") return null;
-  const parsed = parsedValue as StructuredReviewOutput;
-  const findingsRaw = Array.isArray(parsed.findings)
-    ? (parsed.findings as StructuredReviewFinding[])
-    : [];
+  const parsedObject: StructuredReviewOutput =
+    parsedValue && typeof parsedValue === "object" && !Array.isArray(parsedValue)
+      ? (parsedValue as StructuredReviewOutput)
+      : {};
 
+  const bodyFromModel =
+    typeof parsedObject.body === "string" ? parsedObject.body.trim() : "";
+  if (!bodyFromModel) return null;
+
+  const commentsRaw = normalizeStructuredReviewComments(parsedObject);
   const inlineComments: InlineReviewComment[] = [];
-  for (const finding of findingsRaw) {
-    const path = typeof finding.path === "string" ? finding.path.trim() : "";
-    const line =
-      typeof finding.line === "number"
-        ? finding.line
-        : Number.parseInt(String(finding.line ?? ""), 10);
-    const baseBody =
-      typeof finding.body === "string" ? finding.body.trim() : "";
-    const severity =
-      typeof finding.severity === "string" ? finding.severity.trim() : "";
-    if (!path || !Number.isFinite(line) || line <= 0 || !baseBody) continue;
+  for (const finding of commentsRaw) {
+    const pathRaw = typeof finding.path === "string" ? finding.path.trim() : "";
+    const line = parseStrictPositiveLine(finding.line);
+    const body = typeof finding.body === "string" ? finding.body.trim() : "";
+    if (!body) continue;
 
-    const hasSeverityLabel = /(^|\n)\s*-?\s*(severity|심각도)\s*:/i.test(
-      baseBody,
-    );
-    const normalizedBody =
-      severity && !hasSeverityLabel
-        ? `- Severity: [${severity}]\n${baseBody}`
-        : baseBody;
+    const severity = normalizeFindingSeverity(finding.severity);
+    const hasLocation = pathRaw.length > 0 && line !== null;
+
+    if (!hasLocation || line === null) continue;
+    const normalizedBody = normalizeInlineFindingBody({
+      path: pathRaw,
+      line,
+      severity,
+      baseBody: body,
+    });
     inlineComments.push({
-      path,
+      path: pathRaw,
       line,
       body: normalizedBody,
     });
   }
 
-  const body = buildSummaryBodyFromStructured(parsed);
-  return { body, inlineComments };
+  return { body: bodyFromModel, inlineComments };
+}
+
+function isStrictReviewBody(body: string): boolean {
+  const trimmed = body.trim();
+  if (!trimmed.startsWith("🧠 ReviewFlux Review\n\n### Summary")) return false;
+
+  const summaryIndex = trimmed.indexOf("\n### Summary");
+  const findingsIndex = trimmed.indexOf("\n### Findings");
+  const verificationIndex = trimmed.indexOf("\n### Verification Notes");
+  if (summaryIndex < 0 || verificationIndex < 0) return false;
+  if (findingsIndex >= 0) {
+    return summaryIndex < findingsIndex && findingsIndex < verificationIndex;
+  }
+  return summaryIndex < verificationIndex;
+}
+
+function buildContractFailureBody(reason: string): string {
+  return [
+    "🧠 ReviewFlux Review",
+    "",
+    "### Summary",
+    "Review output format validation failed.",
+    "",
+    "### Verification Notes",
+    `- Not Verified: ${reason}`,
+  ].join("\n");
 }
 
 function buildReviewSystemPrompt(params: {
   repo: string;
   prNumber: number;
   reason: ReviewTriggerReason;
+  basePolicyGuidance: string;
 }): string {
   return [
     "You are the ReviewFlux PR review assistant.",
@@ -714,8 +833,14 @@ function buildReviewSystemPrompt(params: {
     "Output must be exactly one JSON object. Do not output markdown, explanations, or code fences.",
     "Follow the output contract (JSON schema) as the highest priority.",
     "If project guidance (AGENTS.md/context) is provided, apply it while preserving the output contract.",
-    "The findings.body field must follow the provided review guidance format rules.",
-    "Use only Small/Medium/High for findings.severity.",
+    ...(params.basePolicyGuidance
+      ? [
+          "Base review role/principles (from REVIEWFLUX-AGENTS.md):",
+          params.basePolicyGuidance,
+        ]
+      : []),
+    "Do not default line numbers to 1. Use exact changed-line numbers from the provided diff.",
+    "Do not output placeholder/meta text like [Pasted ...], ..., TBD, N/A, or <...>.",
     `Repository: ${params.repo}`,
     `Pull Request: #${params.prNumber}`,
     `Trigger reason: ${params.reason}`,
@@ -731,13 +856,13 @@ function buildReviewUserPrompt(params: {
   return [
     ...(params.globalAgentsGuidance
       ? [
-          "Global review guidance (~/.reviewflux/AGENTS.md):",
+          "User global guidance (~/.reviewflux/AGENTS.md):",
           params.globalAgentsGuidance,
           "",
         ]
       : []),
     ...(params.projectContext
-      ? ["Project markdown context:", params.projectContext, ""]
+      ? ["Registered project AGENTS/context markdown:", params.projectContext, ""]
       : []),
     `PR title: ${params.pr.title}`,
     `PR URL: ${params.pr.html_url}`,
@@ -748,15 +873,55 @@ function buildReviewUserPrompt(params: {
     "Unified diff:",
     truncate(params.diff, MAX_DIFF_CHARS),
     "",
+    "Use the role/core principles from REVIEWFLUX-AGENTS.md provided in system prompt.",
+    "In body, follow this strict output format exactly:",
+    "## Review Output Format (Strict)",
+    "- The first line must match this exact string:",
+    "  - 🧠 ReviewFlux Review",
+    "- Add one blank line after the first line, then follow this section order:",
+    "  1. ### Summary",
+    "  2. ### Findings (ordered by severity) (only when issues exist)",
+    "  3. ### Verification Notes",
+    "- If there are no issues, omit the `### Findings` section.",
+    "- Severity must be one of `[Small]`, `[Medium]`, `[High]`.",
+    "- For line-specific findings, `path` must match an actual changed file in the PR diff.",
+    "- For line-specific findings, `line` must be an exact commentable right-side line from the PR diff hunk.",
+    "- Never use placeholder/default line numbers (for example `1`) unless the real issue is actually at that line.",
+    "- If exact location cannot be verified from the diff, do not fabricate location data; keep it as a non-inline/general comment.",
+    "- Do not output placeholder/meta text such as `[Pasted ...]`, `...`, `TBD`, `N/A`, `<...>`.",
+    "- If information is unavailable, write `Not Verified: <reason>` with a concrete reason.",
+    "",
+    "Strict body template:",
+    "🧠 ReviewFlux Review",
+    "",
+    "### Summary",
+    "",
+    "Write the overall judgment in 2-4 lines.",
+    "",
+    "### Findings (ordered by severity) <- only when issues exist",
+    "",
+    "- Severity: [Small]/[Medium]/[High]",
+    "- Evidence: <specific file/function evidence>",
+    "- Risk: <concrete impact if not fixed>",
+    "- Recommendation: <specific fix direction>",
+    "",
+    "### Verification Notes",
+    "",
+    "- Verified: items actually validated from tests/types/build/static review",
+    "- Not Verified: items not validated and why",
+    "",
+    "Use path and line only when you can confidently anchor to a changed line in the diff.",
+    "If a finding is not tied to a specific line, use empty path and empty line for that finding.",
     "Return only JSON with this schema:",
     "{",
-    '  "summary": "string",',
-    '  "verificationNotes": { "verified": ["string"], "notVerified": ["string"] },',
+    '  "body": "string",',
     '  "findings": [',
-    '    { "path": "string", "line": 1, "severity": "Small|Medium|High", "body": "string" }',
+    '    { "path": "src/file.ts", "line": 128, "severity": "Small|Medium|High", "body": "- Evidence: ...\\n- Risk: ...\\n- Recommendation: ..." },',
+    '    { "path": "", "line": "", "severity": "Small|Medium|High", "body": "- Evidence: ...\\n- Risk: ...\\n- Recommendation: ..." }',
     "  ]",
     "}",
-    "If there is no issue, return findings as an empty array.",
+    "If there is no issue, return findings as an empty array and keep body in strict format.",
+    "Do not wrap JSON in code fences.",
   ].join("\n");
 }
 
@@ -766,6 +931,7 @@ async function createReviewComment(params: {
   repo: string;
   pr: PullRequestDetail;
   reason: ReviewTriggerReason;
+  basePolicyGuidance: string;
   globalAgentsGuidance: string;
   projectContext: string;
 }): Promise<{ raw: string; diff: string }> {
@@ -812,6 +978,7 @@ async function createReviewComment(params: {
         repo: params.repo,
         prNumber: params.pr.number,
         reason: params.reason,
+        basePolicyGuidance: params.basePolicyGuidance,
       }),
     },
     {
@@ -880,29 +1047,6 @@ async function postInlineReviewComment(params: {
   );
 }
 
-async function postPullRequestReview(params: {
-  repo: string;
-  prNumber: number;
-  body: string;
-  comments: InlineReviewComment[];
-}): Promise<void> {
-  const { owner, name } = parseOwnerRepo(params.repo);
-  await ghApiJsonWithInput(
-    `repos/${owner}/${name}/pulls/${params.prNumber}/reviews`,
-    "POST",
-    {
-      event: "COMMENT",
-      body: params.body,
-      comments: params.comments.map((comment) => ({
-        path: comment.path,
-        line: comment.line,
-        side: "RIGHT",
-        body: comment.body,
-      })),
-    },
-  );
-}
-
 async function postReviewOutput(params: {
   repo: string;
   prNumber: number;
@@ -912,8 +1056,6 @@ async function postReviewOutput(params: {
   inlineComments?: InlineReviewComment[];
 }): Promise<void> {
   const lineIndex = parseCommentableRightSideLinesFromDiff(params.diff);
-  const combineIntoSingleReviewThread = true;
-  const bufferedInlineComments: InlineReviewComment[] = [];
 
   const context: PublishReviewContext = {
     repo: params.repo,
@@ -946,12 +1088,6 @@ async function postReviewOutput(params: {
         ...comment,
         line,
       };
-
-      if (combineIntoSingleReviewThread) {
-        bufferedInlineComments.push(resolvedComment);
-        return;
-      }
-
       await postInlineReviewComment({
         repo,
         prNumber,
@@ -959,19 +1095,8 @@ async function postReviewOutput(params: {
         comment: resolvedComment,
       });
     },
-    postSummaryComment: async ({ repo, prNumber }, body) => {
-      if (combineIntoSingleReviewThread && bufferedInlineComments.length > 0) {
-        await postPullRequestReview({
-          repo,
-          prNumber,
-          body,
-          comments: bufferedInlineComments,
-        });
-        return;
-      }
-
-      await postReviewComment(repo, prNumber, body);
-    },
+    postSummaryComment: async ({ repo, prNumber }, body) =>
+      postReviewComment(repo, prNumber, body),
   };
 
   await publishReviewWithInlineComments({
@@ -995,6 +1120,7 @@ async function triggerReview(params: {
   prNumber: number;
   reason: ReviewTriggerReason;
 }): Promise<void> {
+  const basePolicyGuidance = loadBasePolicyGuidance();
   const globalAgentsGuidance = loadGlobalAgentsGuidance();
   const pr = await fetchPullRequestDetail(params.repo, params.prNumber);
   let projectContext = "";
@@ -1016,17 +1142,25 @@ async function triggerReview(params: {
     repo: params.repo,
     pr,
     reason: params.reason,
+    basePolicyGuidance,
     globalAgentsGuidance,
     projectContext,
   });
 
   const structured = parseStructuredReviewOutput(review.raw);
+  const fallbackBody = buildContractFailureBody(
+    "invalid model output format (expected strict JSON contract)",
+  );
+  const parsedBody =
+    structured && isStrictReviewBody(structured.body)
+      ? structured.body
+      : fallbackBody;
 
   await postReviewOutput({
     repo: params.repo,
     prNumber: params.prNumber,
     prHeadSha: pr.head.sha,
-    body: structured?.body ?? review.raw,
+    body: parsedBody,
     diff: review.diff,
     inlineComments: structured?.inlineComments,
   });
