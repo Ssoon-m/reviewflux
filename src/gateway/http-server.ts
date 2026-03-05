@@ -7,6 +7,7 @@ import { readConfig } from "../config/env.js";
 import { loadConfig } from "../cli/config.js";
 import { decidePrReview } from "./pr-event-policy.js";
 import { createLlmService } from "../llm/service.js";
+import { createPrReviewQueue, type PrReviewJobPayload } from "./pr-review-queue.js";
 
 export function parsePromptText(input: unknown): string | null {
   if (typeof input !== "string") return null;
@@ -21,6 +22,12 @@ export function getClientErrorCode(_error: unknown): string {
 export function createApp() {
   const config = readConfig();
   const llm = createLlmService(config);
+  const reviewQueue = createPrReviewQueue({
+    concurrency: config.EVENT_QUEUE_CONCURRENCY,
+    retryCount: config.EVENT_QUEUE_RETRY_COUNT,
+    retryDelayMs: config.EVENT_QUEUE_RETRY_DELAY_MS,
+    processJob: processPrReviewJob,
+  });
 
   const app = express();
   app.use(express.json());
@@ -63,14 +70,25 @@ export function createApp() {
       }
 
       const config = loadConfig();
-      const decision = decidePrReview(config, {
+      const event = {
         eventName,
         repo,
         action: typeof req.body?.action === "string" ? req.body.action : undefined,
         commentBody: typeof req.body?.commentBody === "string" ? req.body.commentBody : undefined,
+      };
+      const decision = decidePrReview(config, event);
+
+      if (!decision.shouldReview) {
+        return res.json({ accepted: false, decision });
+      }
+
+      const jobId = reviewQueue.enqueue({
+        ...event,
+        reason: decision.reason,
+        force: decision.force,
       });
 
-      res.json(decision);
+      res.status(202).json({ accepted: true, jobId, decision });
     } catch (error) {
       // eslint-disable-next-line no-console
       console.error("/v1/github/events failed", error);
@@ -79,6 +97,12 @@ export function createApp() {
   });
 
   return { app, config };
+}
+
+async function processPrReviewJob(payload: PrReviewJobPayload): Promise<void> {
+  console.log(
+    `[reviewflux] review job processed repo=${payload.repo} event=${payload.eventName} reason=${payload.reason} force=${payload.force}`,
+  );
 }
 
 function canonicalPath(pathLike: string): string {
