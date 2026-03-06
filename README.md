@@ -6,6 +6,10 @@ A background CLI agent that detects PR events from Git hosting platforms and aut
 
 ReviewFlux runs as a daemon in the background, listening for pull request events. When a PR is detected, it uses an AI agent to analyze the changes and post a review — helping teams automate code review workflows.
 
+## Queue-Based Event Handling
+
+When the daemon receives many events at once, each review can take time because AI analysis is not instantaneous. A queue ensures events are processed safely in order, prevents dropped requests during bursts, and keeps the daemon stable under load.
+
 ## Supported Platforms
 
 | Platform  | Status         |

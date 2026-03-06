@@ -1,4 +1,5 @@
-import { getModels, getOAuthProviders, getProviders } from "@mariozechner/pi-ai";
+import { getModels, getProviders } from "@mariozechner/pi-ai";
+import { getOAuthProviders } from "@mariozechner/pi-ai/oauth";
 
 export type ProviderGroup = {
   groupKey: string;

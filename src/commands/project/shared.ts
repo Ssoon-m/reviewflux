@@ -2,7 +2,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { normalizeRepoKey } from "../../llm/model-routing.js";
 import { promptSelect } from "../../cli/clack-prompter.js";
 import { promptPassword, promptText } from "../../cli/clack-prompter.js";
-import { getOAuthProvider, getOAuthProviders } from "@mariozechner/pi-ai";
+import { getOAuthProvider, getOAuthProviders } from "@mariozechner/pi-ai/oauth";
 import { loginWithPiOAuth, resolveOAuthProviderId } from "../../auth/pi-oauth.js";
 import { getActiveAuthProfile, type LlmProvider, type OAuthConfig, type ReviewFluxConfig } from "../../cli/config.js";
 import {

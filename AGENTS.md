@@ -22,6 +22,8 @@ Each directory should represent a stable domain boundary.
 - **Structure:** command-group based subcommands.
   - Example: `commands/daemon/start.ts`, `commands/daemon/stop.ts`
 - **Rule:** command handlers orchestrate use-cases; heavy reusable logic should be moved to dedicated domain modules.
+- **Must NOT contain:** reusable helper modules that are not user-invoked commands (these should live in domain folders such as `src/llm/` or `src/gateway/`).
+- **Naming rule:** files under `commands/<group>/` should read as subcommands, not shared internals.
 
 ### `src/commands/help/`
 - **Responsibility:** help text and help command behavior.
