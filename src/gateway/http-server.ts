@@ -132,19 +132,16 @@ export function parseEventActorAssociation(input: {
     comment?: { author_association?: unknown };
   };
 
+  const actorAssociation =
+    parseAssociationValue(candidate.author_association) ??
+    parseAssociationValue(candidate.authorAssociation);
+  if (actorAssociation) return actorAssociation;
+
   if (input.eventName === "pull_request") {
-    return (
-      parseAssociationValue(candidate.pull_request?.author_association) ??
-      parseAssociationValue(candidate.author_association) ??
-      parseAssociationValue(candidate.authorAssociation)
-    );
+    return parseAssociationValue(candidate.pull_request?.author_association);
   }
 
-  return (
-    parseAssociationValue(candidate.comment?.author_association) ??
-    parseAssociationValue(candidate.author_association) ??
-    parseAssociationValue(candidate.authorAssociation)
-  );
+  return parseAssociationValue(candidate.comment?.author_association);
 }
 
 export function isCollaboratorAssociation(value: string | null): boolean {

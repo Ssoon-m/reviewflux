@@ -138,6 +138,28 @@ describe("parsePromptText", () => {
     ).toBe("MEMBER");
   });
 
+  it("prefers top-level actor association over nested author fields", () => {
+    expect(
+      parseEventActorAssociation({
+        eventName: "pull_request",
+        payload: {
+          author_association: "member",
+          pull_request: { author_association: "none" },
+        },
+      }),
+    ).toBe("MEMBER");
+
+    expect(
+      parseEventActorAssociation({
+        eventName: "issue_comment",
+        payload: {
+          authorAssociation: "collaborator",
+          comment: { author_association: "none" },
+        },
+      }),
+    ).toBe("COLLABORATOR");
+  });
+
   it("recognizes collaborator author associations only", () => {
     expect(isCollaboratorAssociation("OWNER")).toBe(true);
     expect(isCollaboratorAssociation("MEMBER")).toBe(true);
