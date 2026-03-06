@@ -4,6 +4,7 @@ import {
   classifyCollaboratorCheckError,
   getClientErrorCode,
   markRecentEventKey,
+  parseEventRepository,
   parsePrNumber,
   parsePromptText,
   parseSenderLogin,
@@ -127,6 +128,41 @@ describe("parsePromptText", () => {
     );
     expect(parseSenderLogin({})).toBeNull();
     expect(parseSenderLogin(null)).toBeNull();
+  });
+
+  it("resolves event repository with PR base repo precedence", () => {
+    expect(
+      parseEventRepository({
+        payload: {
+          pull_request: {
+            base: { repo: { full_name: "upstream/reviewflux" } },
+          },
+          repository: { full_name: "fork/reviewflux" },
+        },
+        fallbackRepo: "fallback/reviewflux",
+      }),
+    ).toBe("upstream/reviewflux");
+
+    expect(
+      parseEventRepository({
+        payload: { repository: { full_name: "repo/from-payload" } },
+        fallbackRepo: "fallback/reviewflux",
+      }),
+    ).toBe("repo/from-payload");
+
+    expect(
+      parseEventRepository({
+        payload: { baseRepo: "repo/from-baseRepo" },
+        fallbackRepo: "fallback/reviewflux",
+      }),
+    ).toBe("repo/from-baseRepo");
+
+    expect(
+      parseEventRepository({
+        payload: {},
+        fallbackRepo: "fallback/reviewflux",
+      }),
+    ).toBe("fallback/reviewflux");
   });
 
   it("classifies collaborator check errors by status semantics", () => {

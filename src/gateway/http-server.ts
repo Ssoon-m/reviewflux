@@ -132,6 +132,45 @@ export function parseSenderLogin(payload: unknown): string | null {
   return fallback || null;
 }
 
+export function parseEventRepository(input: {
+  payload: unknown;
+  fallbackRepo: string;
+}): string {
+  const fallback = input.fallbackRepo.trim();
+  if (!input.payload || typeof input.payload !== "object") return fallback;
+
+  const candidate = input.payload as {
+    pull_request?: { base?: { repo?: { full_name?: unknown } } };
+    repository?: { full_name?: unknown };
+    baseRepo?: unknown;
+    baseRepository?: { full_name?: unknown };
+  };
+
+  const fromPrBase =
+    typeof candidate.pull_request?.base?.repo?.full_name === "string"
+      ? candidate.pull_request.base.repo.full_name.trim()
+      : "";
+  if (fromPrBase) return fromPrBase;
+
+  const fromRepoObject =
+    typeof candidate.repository?.full_name === "string"
+      ? candidate.repository.full_name.trim()
+      : "";
+  if (fromRepoObject) return fromRepoObject;
+
+  const fromBaseRepository =
+    typeof candidate.baseRepository?.full_name === "string"
+      ? candidate.baseRepository.full_name.trim()
+      : "";
+  if (fromBaseRepository) return fromBaseRepository;
+
+  const fromBaseRepo =
+    typeof candidate.baseRepo === "string" ? candidate.baseRepo.trim() : "";
+  if (fromBaseRepo) return fromBaseRepo;
+
+  return fallback;
+}
+
 function parseOwnerRepo(repo: string): { owner: string; name: string } | null {
   const trimmed = repo.trim();
   if (!trimmed) return null;
@@ -302,10 +341,15 @@ export function createApp() {
         return res.status(400).json({ error: "invalid_event_payload" });
       }
 
+      const effectiveRepo = parseEventRepository({
+        payload: req.body,
+        fallbackRepo: repo,
+      });
+
       const config = loadConfig();
       const event = {
         eventName,
-        repo,
+        repo: effectiveRepo,
         action: typeof req.body?.action === "string" ? req.body.action : undefined,
         commentBody: typeof req.body?.commentBody === "string" ? req.body.commentBody : undefined,
       };
@@ -338,7 +382,7 @@ export function createApp() {
       }
 
       const isCollaborator = await isSenderCollaborator({
-        repo,
+        repo: effectiveRepo,
         senderLogin,
       });
       if (isCollaborator === "check_failed") {
@@ -359,7 +403,7 @@ export function createApp() {
       const dedupeKey = buildReviewEventDedupeKey({
         deliveryId: parseHeaderValue(req.headers["x-github-delivery"]),
         eventName,
-        repo,
+        repo: effectiveRepo,
         action: event.action,
         prNumber,
         reason: decision.reason,
