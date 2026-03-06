@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   buildReviewEventDedupeKey,
   getClientErrorCode,
+  isCollaboratorAssociation,
   markRecentEventKey,
+  parseEventActorAssociation,
   parsePrNumber,
   parsePromptText,
 } from "../src/gateway/http-server.js";
@@ -111,5 +113,37 @@ describe("parsePromptText", () => {
     expect(parsePrNumber({ prNumber: "0" })).toBeNull();
     expect(parsePrNumber({ prNumber: "-1" })).toBeNull();
     expect(parsePrNumber({ pull_request: { number: "89xyz" } })).toBeNull();
+  });
+
+  it("parses actor association by event shape", () => {
+    expect(
+      parseEventActorAssociation({
+        eventName: "pull_request",
+        payload: { pull_request: { author_association: "owner" } },
+      }),
+    ).toBe("OWNER");
+
+    expect(
+      parseEventActorAssociation({
+        eventName: "issue_comment",
+        payload: { comment: { author_association: "collaborator" } },
+      }),
+    ).toBe("COLLABORATOR");
+
+    expect(
+      parseEventActorAssociation({
+        eventName: "pull_request_review_comment",
+        payload: { authorAssociation: "member" },
+      }),
+    ).toBe("MEMBER");
+  });
+
+  it("recognizes collaborator author associations only", () => {
+    expect(isCollaboratorAssociation("OWNER")).toBe(true);
+    expect(isCollaboratorAssociation("MEMBER")).toBe(true);
+    expect(isCollaboratorAssociation("COLLABORATOR")).toBe(true);
+    expect(isCollaboratorAssociation("CONTRIBUTOR")).toBe(false);
+    expect(isCollaboratorAssociation("NONE")).toBe(false);
+    expect(isCollaboratorAssociation(null)).toBe(false);
   });
 });

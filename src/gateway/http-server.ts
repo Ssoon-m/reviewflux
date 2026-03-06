@@ -13,6 +13,11 @@ import { processPrReviewJob } from "./review-job-runner.js";
 
 const EVENT_DEDUPE_TTL_MS = 10 * 60 * 1000;
 const EVENT_DEDUPE_MAX_KEYS = 5000;
+const COLLABORATOR_AUTHOR_ASSOCIATIONS = new Set([
+  "OWNER",
+  "MEMBER",
+  "COLLABORATOR",
+]);
 
 export function parsePromptText(input: unknown): string | null {
   if (typeof input !== "string") return null;
@@ -107,6 +112,44 @@ function parseHeaderValue(value: string | string[] | undefined): string | null {
     }
   }
   return null;
+}
+
+function parseAssociationValue(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim().toUpperCase();
+  return normalized.length > 0 ? normalized : null;
+}
+
+export function parseEventActorAssociation(input: {
+  eventName: "pull_request" | "issue_comment" | "pull_request_review_comment";
+  payload: unknown;
+}): string | null {
+  if (!input.payload || typeof input.payload !== "object") return null;
+  const candidate = input.payload as {
+    author_association?: unknown;
+    authorAssociation?: unknown;
+    pull_request?: { author_association?: unknown };
+    comment?: { author_association?: unknown };
+  };
+
+  if (input.eventName === "pull_request") {
+    return (
+      parseAssociationValue(candidate.pull_request?.author_association) ??
+      parseAssociationValue(candidate.author_association) ??
+      parseAssociationValue(candidate.authorAssociation)
+    );
+  }
+
+  return (
+    parseAssociationValue(candidate.comment?.author_association) ??
+    parseAssociationValue(candidate.author_association) ??
+    parseAssociationValue(candidate.authorAssociation)
+  );
+}
+
+export function isCollaboratorAssociation(value: string | null): boolean {
+  if (!value) return false;
+  return COLLABORATOR_AUTHOR_ASSOCIATIONS.has(value);
 }
 
 export function buildReviewEventDedupeKey(input: {
@@ -256,6 +299,18 @@ export function createApp() {
         decision.reason !== "on_push"
       ) {
         return res.status(500).json({ error: "invalid_review_reason" });
+      }
+
+      const actorAssociation = parseEventActorAssociation({
+        eventName,
+        payload: req.body,
+      });
+      if (!isCollaboratorAssociation(actorAssociation)) {
+        return res.status(202).json({
+          accepted: false,
+          blocked: "non_collaborator_trigger",
+          decision,
+        });
       }
 
       const dedupeKey = buildReviewEventDedupeKey({
