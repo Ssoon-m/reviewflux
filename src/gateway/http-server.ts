@@ -143,9 +143,9 @@ function parseOwnerRepo(repo: string): { owner: string; name: string } | null {
 async function isSenderCollaborator(params: {
   repo: string;
   senderLogin: string;
-}): Promise<boolean> {
+}): Promise<"collaborator" | "not_collaborator" | "check_failed"> {
   const parsed = parseOwnerRepo(params.repo);
-  if (!parsed) return false;
+  if (!parsed) return "not_collaborator";
 
   const path = `repos/${encodeURIComponent(parsed.owner)}/${encodeURIComponent(parsed.name)}/collaborators/${encodeURIComponent(params.senderLogin)}`;
 
@@ -155,18 +155,28 @@ async function isSenderCollaborator(params: {
       maxBuffer: GH_API_MAX_BUFFER,
       encoding: "utf8",
     });
-    return true;
+    return "collaborator";
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    if (message.includes("HTTP 404") || message.includes("Not Found")) {
-      return false;
+    const status = classifyCollaboratorCheckError(error);
+    if (status === "not_collaborator") {
+      return "not_collaborator";
     }
     console.error(
       `[reviewflux] collaborator check failed for @${params.senderLogin} in ${params.repo}`,
     );
-    console.error(message);
-    return false;
+    console.error(error instanceof Error ? error.message : String(error));
+    return "check_failed";
   }
+}
+
+export function classifyCollaboratorCheckError(
+  error: unknown,
+): "not_collaborator" | "check_failed" {
+  const message = error instanceof Error ? error.message : String(error);
+  if (message.includes("HTTP 404") || message.includes("Not Found")) {
+    return "not_collaborator";
+  }
+  return "check_failed";
 }
 
 export function buildReviewEventDedupeKey(input: {
@@ -331,7 +341,14 @@ export function createApp() {
         repo,
         senderLogin,
       });
-      if (!isCollaborator) {
+      if (isCollaborator === "check_failed") {
+        return res.status(503).json({
+          accepted: false,
+          error: "collaborator_check_failed",
+          decision,
+        });
+      }
+      if (isCollaborator !== "collaborator") {
         return res.status(202).json({
           accepted: false,
           blocked: "non_collaborator_trigger",

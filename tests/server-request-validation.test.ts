@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildReviewEventDedupeKey,
+  classifyCollaboratorCheckError,
   getClientErrorCode,
   markRecentEventKey,
   parsePrNumber,
@@ -126,5 +127,15 @@ describe("parsePromptText", () => {
     );
     expect(parseSenderLogin({})).toBeNull();
     expect(parseSenderLogin(null)).toBeNull();
+  });
+
+  it("classifies collaborator check errors by status semantics", () => {
+    expect(
+      classifyCollaboratorCheckError(new Error("gh: Not Found (HTTP 404)")),
+    ).toBe("not_collaborator");
+    expect(
+      classifyCollaboratorCheckError(new Error("HTTP 500 Internal Server Error")),
+    ).toBe("check_failed");
+    expect(classifyCollaboratorCheckError("network timeout")).toBe("check_failed");
   });
 });
