@@ -12,8 +12,18 @@ type StructuredReviewOutput = {
 };
 
 type ParsedStructuredReview = {
+  /**
+   * bodyFromModel is the full review body directly provided by the model in JSON, and when the value is empty, it is converted to null to consistently represent “no body provided.”
+   */
   body: string | null;
+  /**
+   * inlineComments is the subset of findings that can be posted as GitHub inline comments (valid path + line + body).
+   */
   inlineComments: InlineReviewComment[];
+  /**
+   * findingBodies is the list of non-empty finding texts used for summary fallback when inline anchoring is unavailable.
+   * Inline anchoring: path/line mapping that lets GitHub place a comment on a specific changed line in the diff.
+   */
   findingBodies: string[];
 };
 
@@ -191,12 +201,7 @@ function buildNoIssueBody(): string {
   return [
     "🧠 ReviewFlux Review",
     "",
-    "### Summary",
-    "Great news - no actionable issues were found in this PR.",
-    "",
-    "### Verification Notes",
-    "- Verified: Structured review completed without findings.",
-    "- Not Verified: Runtime behavior beyond static/diff-level review.",
+    "Great news - no actionable issues were found in this PR. 👍",
   ].join("\n");
 }
 

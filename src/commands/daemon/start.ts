@@ -680,7 +680,7 @@ export function buildReviewUserPrompt(params: {
   ].join("\n");
 }
 
-async function createReviewComment(params: {
+async function createReviewCommentFromLLM(params: {
   config: ReviewFluxConfig;
   project: ProjectConfig;
   repo: string;
@@ -860,7 +860,7 @@ async function triggerReview(params: {
       console.error(error instanceof Error ? error.message : String(error));
     }
 
-    const review = await createReviewComment({
+    const review = await createReviewCommentFromLLM({
       config: params.config,
       project: params.project,
       repo: params.repo,

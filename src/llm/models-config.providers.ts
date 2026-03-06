@@ -5,7 +5,7 @@ import type { LlmProviderName } from "./types.js";
  * Model catalog and support checks depend only on pi-ai:
  * - getProviders() / getModels(provider) define the catalog.
  * - getModel(provider, model) is the final authority for runtime support.
- * No static model list is maintained here; follow openclaw-style selection
+ * No static model list is maintained here
  * (alias, allowlist, parsing) while keeping the catalog source as pi-ai.
  */
 
