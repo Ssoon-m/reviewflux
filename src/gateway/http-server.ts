@@ -7,9 +7,9 @@ import { readConfig } from "../config/env.js";
 import { loadConfig } from "../cli/config.js";
 import { decidePrReview } from "./pr-event-policy.js";
 import { createLlmService } from "../llm/service.js";
-import { createPrReviewQueue, type PrReviewJobPayload } from "./pr-review-queue.js";
-import { runQueuedReviewJob } from "../commands/daemon/start.js";
+import { createPrReviewQueue } from "./pr-review-queue.js";
 import { normalizeRepoKey } from "../llm/model-routing.js";
+import { processPrReviewJob } from "./review-job-runner.js";
 
 const EVENT_DEDUPE_TTL_MS = 10 * 60 * 1000;
 const EVENT_DEDUPE_MAX_KEYS = 5000;
@@ -20,7 +20,20 @@ export function parsePromptText(input: unknown): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
-function parsePrNumber(payload: unknown): number | null {
+function parseStrictPositiveInteger(value: unknown): number | null {
+  if (typeof value === "number") {
+    return Number.isInteger(value) && value > 0 ? value : null;
+  }
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!/^\d+$/.test(trimmed)) return null;
+    const parsed = Number.parseInt(trimmed, 10);
+    return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+  }
+  return null;
+}
+
+export function parsePrNumber(payload: unknown): number | null {
   if (!payload || typeof payload !== "object") return null;
   const candidate = payload as {
     prNumber?: unknown;
@@ -28,21 +41,14 @@ function parsePrNumber(payload: unknown): number | null {
     issue?: { number?: unknown };
   };
 
-  const direct =
-    typeof candidate.prNumber === "number"
-      ? candidate.prNumber
-      : typeof candidate.prNumber === "string"
-        ? Number.parseInt(candidate.prNumber, 10)
-        : Number.NaN;
-  if (Number.isInteger(direct) && direct > 0) return direct;
+  const direct = parseStrictPositiveInteger(candidate.prNumber);
+  if (direct !== null) return direct;
 
-  const nested =
-    typeof candidate.pull_request?.number === "number"
-      ? candidate.pull_request.number
-      : typeof candidate.issue?.number === "number"
-        ? candidate.issue.number
-        : Number.NaN;
-  if (Number.isInteger(nested) && nested > 0) return nested;
+  const prNested = parseStrictPositiveInteger(candidate.pull_request?.number);
+  if (prNested !== null) return prNested;
+
+  const issueNested = parseStrictPositiveInteger(candidate.issue?.number);
+  if (issueNested !== null) return issueNested;
 
   return null;
 }
@@ -186,7 +192,7 @@ export function createApp() {
   app.use(express.json());
 
   app.get("/health", (_req, res) => {
-    res.json({ ok: true });
+    res.json({ ok: true, queueRecentFailures: reviewQueue.getRecentFailures().length });
   });
 
   app.post("/v1/ask", async (req, res) => {
@@ -288,15 +294,6 @@ export function createApp() {
 
   return { app, config };
 }
-
-async function processPrReviewJob(payload: PrReviewJobPayload): Promise<void> {
-  await runQueuedReviewJob({
-    repo: payload.repo,
-    prNumber: payload.prNumber,
-    reason: payload.reason,
-  });
-}
-
 function canonicalPath(pathLike: string): string {
   try {
     return realpathSync(pathLike);

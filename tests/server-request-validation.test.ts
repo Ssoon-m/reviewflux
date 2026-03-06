@@ -3,6 +3,7 @@ import {
   buildReviewEventDedupeKey,
   getClientErrorCode,
   markRecentEventKey,
+  parsePrNumber,
   parsePromptText,
 } from "../src/gateway/http-server.js";
 import { parseModelAliasesJson } from "../src/llm/service.js";
@@ -91,5 +92,24 @@ describe("parsePromptText", () => {
 
     expect(markRecentEventKey(cache, "k2", now)).toBe(false);
     expect(markRecentEventKey(cache, "k2", now + 10 * 60 * 1000 + 1)).toBe(false);
+  });
+
+  it("parses strict positive PR numbers from direct and nested payloads", () => {
+    expect(parsePrNumber({ prNumber: 12 })).toBe(12);
+    expect(parsePrNumber({ prNumber: "12" })).toBe(12);
+    expect(parsePrNumber({ pull_request: { number: 34 } })).toBe(34);
+    expect(parsePrNumber({ pull_request: { number: "34" } })).toBe(34);
+    expect(parsePrNumber({ issue: { number: 56 } })).toBe(56);
+    expect(parsePrNumber({ issue: { number: "56" } })).toBe(56);
+  });
+
+  it("rejects malformed PR number strings", () => {
+    expect(parsePrNumber({ prNumber: "12abc" })).toBeNull();
+    expect(parsePrNumber({ prNumber: "12.3" })).toBeNull();
+    expect(parsePrNumber({ prNumber: "" })).toBeNull();
+    expect(parsePrNumber({ prNumber: "   " })).toBeNull();
+    expect(parsePrNumber({ prNumber: "0" })).toBeNull();
+    expect(parsePrNumber({ prNumber: "-1" })).toBeNull();
+    expect(parsePrNumber({ pull_request: { number: "89xyz" } })).toBeNull();
   });
 });
