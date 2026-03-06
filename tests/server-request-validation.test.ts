@@ -2,11 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   buildReviewEventDedupeKey,
   getClientErrorCode,
-  isCollaboratorAssociation,
   markRecentEventKey,
-  parseEventActorAssociation,
   parsePrNumber,
   parsePromptText,
+  parseSenderLogin,
 } from "../src/gateway/http-server.js";
 import { parseModelAliasesJson } from "../src/llm/service.js";
 
@@ -115,57 +114,17 @@ describe("parsePromptText", () => {
     expect(parsePrNumber({ pull_request: { number: "89xyz" } })).toBeNull();
   });
 
-  it("parses actor association by event shape", () => {
+  it("parses sender login from sender object or fallback field", () => {
     expect(
-      parseEventActorAssociation({
-        eventName: "pull_request",
-        payload: { pull_request: { author_association: "owner" } },
-      }),
-    ).toBe("OWNER");
+      parseSenderLogin({ sender: { login: "Ssoon-m" } }),
+    ).toBe("Ssoon-m");
 
-    expect(
-      parseEventActorAssociation({
-        eventName: "issue_comment",
-        payload: { comment: { author_association: "collaborator" } },
-      }),
-    ).toBe("COLLABORATOR");
+    expect(parseSenderLogin({ senderLogin: "review-bot" })).toBe("review-bot");
 
-    expect(
-      parseEventActorAssociation({
-        eventName: "pull_request_review_comment",
-        payload: { authorAssociation: "member" },
-      }),
-    ).toBe("MEMBER");
-  });
-
-  it("prefers top-level actor association over nested author fields", () => {
-    expect(
-      parseEventActorAssociation({
-        eventName: "pull_request",
-        payload: {
-          author_association: "member",
-          pull_request: { author_association: "none" },
-        },
-      }),
-    ).toBe("MEMBER");
-
-    expect(
-      parseEventActorAssociation({
-        eventName: "issue_comment",
-        payload: {
-          authorAssociation: "collaborator",
-          comment: { author_association: "none" },
-        },
-      }),
-    ).toBe("COLLABORATOR");
-  });
-
-  it("recognizes collaborator author associations only", () => {
-    expect(isCollaboratorAssociation("OWNER")).toBe(true);
-    expect(isCollaboratorAssociation("MEMBER")).toBe(true);
-    expect(isCollaboratorAssociation("COLLABORATOR")).toBe(true);
-    expect(isCollaboratorAssociation("CONTRIBUTOR")).toBe(false);
-    expect(isCollaboratorAssociation("NONE")).toBe(false);
-    expect(isCollaboratorAssociation(null)).toBe(false);
+    expect(parseSenderLogin({ sender: { login: "  " }, senderLogin: "fallback" })).toBe(
+      "fallback",
+    );
+    expect(parseSenderLogin({})).toBeNull();
+    expect(parseSenderLogin(null)).toBeNull();
   });
 });

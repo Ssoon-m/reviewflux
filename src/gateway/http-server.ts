@@ -1,8 +1,10 @@
 import "dotenv/config";
 import express from "express";
+import { execFile } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { realpathSync } from "node:fs";
 import { resolve } from "node:path";
+import { promisify } from "node:util";
 import { readConfig } from "../config/env.js";
 import { loadConfig } from "../cli/config.js";
 import { decidePrReview } from "./pr-event-policy.js";
@@ -13,11 +15,9 @@ import { processPrReviewJob } from "./review-job-runner.js";
 
 const EVENT_DEDUPE_TTL_MS = 10 * 60 * 1000;
 const EVENT_DEDUPE_MAX_KEYS = 5000;
-const COLLABORATOR_AUTHOR_ASSOCIATIONS = new Set([
-  "OWNER",
-  "MEMBER",
-  "COLLABORATOR",
-]);
+const GH_API_TIMEOUT_MS = 30_000;
+const GH_API_MAX_BUFFER = 10 * 1024 * 1024;
+const execFileAsync = promisify(execFile);
 
 export function parsePromptText(input: unknown): string | null {
   if (typeof input !== "string") return null;
@@ -114,39 +114,59 @@ function parseHeaderValue(value: string | string[] | undefined): string | null {
   return null;
 }
 
-function parseAssociationValue(value: unknown): string | null {
-  if (typeof value !== "string") return null;
-  const normalized = value.trim().toUpperCase();
-  return normalized.length > 0 ? normalized : null;
-}
-
-export function parseEventActorAssociation(input: {
-  eventName: "pull_request" | "issue_comment" | "pull_request_review_comment";
-  payload: unknown;
-}): string | null {
-  if (!input.payload || typeof input.payload !== "object") return null;
-  const candidate = input.payload as {
-    author_association?: unknown;
-    authorAssociation?: unknown;
-    pull_request?: { author_association?: unknown };
-    comment?: { author_association?: unknown };
+export function parseSenderLogin(payload: unknown): string | null {
+  if (!payload || typeof payload !== "object") return null;
+  const candidate = payload as {
+    sender?: { login?: unknown };
+    senderLogin?: unknown;
   };
 
-  const actorAssociation =
-    parseAssociationValue(candidate.author_association) ??
-    parseAssociationValue(candidate.authorAssociation);
-  if (actorAssociation) return actorAssociation;
+  const senderLogin =
+    typeof candidate.sender?.login === "string"
+      ? candidate.sender.login.trim()
+      : "";
+  if (senderLogin) return senderLogin;
 
-  if (input.eventName === "pull_request") {
-    return parseAssociationValue(candidate.pull_request?.author_association);
-  }
-
-  return parseAssociationValue(candidate.comment?.author_association);
+  const fallback =
+    typeof candidate.senderLogin === "string" ? candidate.senderLogin.trim() : "";
+  return fallback || null;
 }
 
-export function isCollaboratorAssociation(value: string | null): boolean {
-  if (!value) return false;
-  return COLLABORATOR_AUTHOR_ASSOCIATIONS.has(value);
+function parseOwnerRepo(repo: string): { owner: string; name: string } | null {
+  const trimmed = repo.trim();
+  if (!trimmed) return null;
+  const [owner, name, ...rest] = trimmed.split("/");
+  if (!owner || !name || rest.length > 0) return null;
+  return { owner, name };
+}
+
+async function isSenderCollaborator(params: {
+  repo: string;
+  senderLogin: string;
+}): Promise<boolean> {
+  const parsed = parseOwnerRepo(params.repo);
+  if (!parsed) return false;
+
+  const path = `repos/${encodeURIComponent(parsed.owner)}/${encodeURIComponent(parsed.name)}/collaborators/${encodeURIComponent(params.senderLogin)}`;
+
+  try {
+    await execFileAsync("gh", ["api", path], {
+      timeout: GH_API_TIMEOUT_MS,
+      maxBuffer: GH_API_MAX_BUFFER,
+      encoding: "utf8",
+    });
+    return true;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (message.includes("HTTP 404") || message.includes("Not Found")) {
+      return false;
+    }
+    console.error(
+      `[reviewflux] collaborator check failed for @${params.senderLogin} in ${params.repo}`,
+    );
+    console.error(message);
+    return false;
+  }
 }
 
 export function buildReviewEventDedupeKey(input: {
@@ -257,7 +277,7 @@ export function createApp() {
     }
   });
 
-  app.post("/v1/github/events", (req, res) => {
+  app.post("/v1/github/events", async (req, res) => {
     try {
       const eventName = req.body?.eventName;
       const repo = req.body?.repo;
@@ -298,11 +318,20 @@ export function createApp() {
         return res.status(500).json({ error: "invalid_review_reason" });
       }
 
-      const actorAssociation = parseEventActorAssociation({
-        eventName,
-        payload: req.body,
+      const senderLogin = parseSenderLogin(req.body);
+      if (!senderLogin) {
+        return res.status(202).json({
+          accepted: false,
+          blocked: "missing_sender",
+          decision,
+        });
+      }
+
+      const isCollaborator = await isSenderCollaborator({
+        repo,
+        senderLogin,
       });
-      if (!isCollaboratorAssociation(actorAssociation)) {
+      if (!isCollaborator) {
         return res.status(202).json({
           accepted: false,
           blocked: "non_collaborator_trigger",
