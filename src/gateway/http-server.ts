@@ -171,6 +171,54 @@ export function parseEventRepository(input: {
   return fallback;
 }
 
+function normalizeGitHubLogin(login: string): string {
+  return login.trim().toLowerCase();
+}
+
+export function parseBaseRepoOwnerLogin(payload: unknown): string | null {
+  if (!payload || typeof payload !== "object") return null;
+
+  const candidate = payload as {
+    pull_request?: { base?: { repo?: { owner?: { login?: unknown } } } };
+    repository?: { owner?: { login?: unknown } };
+    baseRepository?: { owner?: { login?: unknown } };
+    baseRepoOwnerLogin?: unknown;
+  };
+
+  const fromPrBase =
+    typeof candidate.pull_request?.base?.repo?.owner?.login === "string"
+      ? candidate.pull_request.base.repo.owner.login.trim()
+      : "";
+  if (fromPrBase) return fromPrBase;
+
+  const fromRepository =
+    typeof candidate.repository?.owner?.login === "string"
+      ? candidate.repository.owner.login.trim()
+      : "";
+  if (fromRepository) return fromRepository;
+
+  const fromBaseRepository =
+    typeof candidate.baseRepository?.owner?.login === "string"
+      ? candidate.baseRepository.owner.login.trim()
+      : "";
+  if (fromBaseRepository) return fromBaseRepository;
+
+  const fromFallback =
+    typeof candidate.baseRepoOwnerLogin === "string"
+      ? candidate.baseRepoOwnerLogin.trim()
+      : "";
+  return fromFallback || null;
+}
+
+export function isSenderBaseRepoOwner(input: {
+  payload: unknown;
+  senderLogin: string;
+}): boolean {
+  const ownerLogin = parseBaseRepoOwnerLogin(input.payload);
+  if (!ownerLogin) return false;
+  return normalizeGitHubLogin(ownerLogin) === normalizeGitHubLogin(input.senderLogin);
+}
+
 function parseOwnerRepo(repo: string): { owner: string; name: string } | null {
   const trimmed = repo.trim();
   if (!trimmed) return null;
@@ -381,23 +429,25 @@ export function createApp() {
         });
       }
 
-      const isCollaborator = await isSenderCollaborator({
-        repo: effectiveRepo,
-        senderLogin,
-      });
-      if (isCollaborator === "check_failed") {
-        return res.status(503).json({
-          accepted: false,
-          error: "collaborator_check_failed",
-          decision,
+      if (!isSenderBaseRepoOwner({ payload: req.body, senderLogin })) {
+        const isCollaborator = await isSenderCollaborator({
+          repo: effectiveRepo,
+          senderLogin,
         });
-      }
-      if (isCollaborator !== "collaborator") {
-        return res.status(202).json({
-          accepted: false,
-          blocked: "non_collaborator_trigger",
-          decision,
-        });
+        if (isCollaborator === "check_failed") {
+          return res.status(503).json({
+            accepted: false,
+            error: "collaborator_check_failed",
+            decision,
+          });
+        }
+        if (isCollaborator !== "collaborator") {
+          return res.status(202).json({
+            accepted: false,
+            blocked: "non_collaborator_trigger",
+            decision,
+          });
+        }
       }
 
       const dedupeKey = buildReviewEventDedupeKey({

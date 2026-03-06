@@ -3,7 +3,9 @@ import {
   buildReviewEventDedupeKey,
   classifyCollaboratorCheckError,
   getClientErrorCode,
+  isSenderBaseRepoOwner,
   markRecentEventKey,
+  parseBaseRepoOwnerLogin,
   parseEventRepository,
   parsePrNumber,
   parsePromptText,
@@ -163,6 +165,65 @@ describe("parsePromptText", () => {
         fallbackRepo: "fallback/reviewflux",
       }),
     ).toBe("fallback/reviewflux");
+  });
+
+  it("parses base repository owner login with correct precedence", () => {
+    expect(
+      parseBaseRepoOwnerLogin({
+        pull_request: {
+          base: {
+            repo: {
+              owner: { login: "UpstreamOwner" },
+            },
+          },
+        },
+        repository: { owner: { login: "ForkOwner" } },
+      }),
+    ).toBe("UpstreamOwner");
+
+    expect(
+      parseBaseRepoOwnerLogin({
+        repository: { owner: { login: "RepoOwner" } },
+      }),
+    ).toBe("RepoOwner");
+
+    expect(parseBaseRepoOwnerLogin({ baseRepoOwnerLogin: "FallbackOwner" })).toBe(
+      "FallbackOwner",
+    );
+
+    expect(parseBaseRepoOwnerLogin({})).toBeNull();
+  });
+
+  it("detects sender as base repository owner case-insensitively", () => {
+    expect(
+      isSenderBaseRepoOwner({
+        payload: {
+          pull_request: {
+            base: {
+              repo: {
+                owner: { login: "Ssoon-m" },
+              },
+            },
+          },
+        },
+        senderLogin: "ssoon-M",
+      }),
+    ).toBe(true);
+
+    expect(
+      isSenderBaseRepoOwner({
+        payload: {
+          pull_request: {
+            base: {
+              repo: {
+                owner: { login: "AnotherOwner" },
+              },
+            },
+          },
+        },
+        senderLogin: "ssoon-m",
+      }),
+    ).toBe(false);
   });
 
   it("classifies collaborator check errors by status semantics", () => {
