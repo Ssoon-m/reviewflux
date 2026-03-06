@@ -29,11 +29,12 @@ import {
 } from "../../llm/project-context.js";
 import { resolveCodexEffort } from "../../llm/reasoning-effort.js";
 import {
-  publishReviewWithInlineComments,
   type InlineReviewComment,
-  type PublishReviewContext,
-  type ReviewPublisherAdapter,
 } from "../../gateway/review-publisher.js";
+import { resolveReviewOutputFromModel } from "../../llm/review-output.js";
+import { postReviewOutput } from "../../gateway/review-posting.js";
+
+export { resolveReviewOutputFromModel } from "../../llm/review-output.js";
 
 type PullRequestSummary = {
   number: number;
@@ -76,6 +77,7 @@ type ProjectPollState = {
   initialized: boolean;
   prHeads: Record<string, string>;
   seenForceCommentIds: string[];
+  postedReviewKeys: string[];
 };
 
 type DaemonState = {
@@ -118,33 +120,13 @@ type PullRequestFile = {
   filename: string;
 };
 
-type DiffLineIndex = Map<string, number[]>;
-
-type StructuredReviewComment = {
-  path?: unknown;
-  line?: unknown;
-  severity?: unknown;
-  body?: unknown;
-};
-
-type StructuredReviewOutput = {
-  body?: unknown;
-  findings?: unknown;
-};
-
-type ParsedStructuredReview = {
-  body: string | null;
-  inlineComments: InlineReviewComment[];
-  findingBodies: string[];
-};
-
-type FindingSeverity = "Small" | "Medium" | "High";
-
 const FORCE_COMMAND = "@reviewflux";
 const MAX_DIFF_CHARS = 18000;
 const MAX_GLOBAL_AGENTS_CHARS = 6000;
 const MAX_BASE_POLICY_CHARS = 6000;
 const BASE_POLICY_FILE = "REVIEWFLUX-AGENTS.md";
+
+const inFlightReviewKeys = new Set<string>();
 
 function resolvePollIntervalMs(raw: string | undefined): number {
   const parsed = Number.parseInt(raw ?? "", 10);
@@ -411,6 +393,7 @@ function buildProjectState(state: DaemonState, repo: string): ProjectPollState {
     existing.initialized = existing.initialized ?? false;
     existing.prHeads = existing.prHeads ?? {};
     existing.seenForceCommentIds = existing.seenForceCommentIds ?? [];
+    existing.postedReviewKeys = existing.postedReviewKeys ?? [];
     return existing;
   }
 
@@ -418,6 +401,7 @@ function buildProjectState(state: DaemonState, repo: string): ProjectPollState {
     initialized: false,
     prHeads: {},
     seenForceCommentIds: [],
+    postedReviewKeys: [],
   };
   state.projects[key] = created;
   return created;
@@ -469,6 +453,41 @@ function trackSeenCommentId(projectState: ProjectPollState, id: string): void {
     projectState.seenForceCommentIds =
       projectState.seenForceCommentIds.slice(-500);
   }
+}
+
+function buildPostedReviewKey(params: {
+  prNumber: number;
+  prHeadSha: string;
+  reason: ReviewTriggerReason;
+}): string {
+  return `${params.prNumber}:${params.prHeadSha}:${params.reason}`;
+}
+
+export function hasPostedReviewKey(params: {
+  postedReviewKeys: string[];
+  prNumber: number;
+  prHeadSha: string;
+  reason: "opened_once" | "on_push" | "manual_force";
+}): boolean {
+  return params.postedReviewKeys.includes(
+    buildPostedReviewKey({
+      prNumber: params.prNumber,
+      prHeadSha: params.prHeadSha,
+      reason: params.reason,
+    }),
+  );
+}
+
+function trackPostedReviewKey(projectState: ProjectPollState, key: string): void {
+  if (projectState.postedReviewKeys.includes(key)) return;
+  projectState.postedReviewKeys.push(key);
+  if (projectState.postedReviewKeys.length > 1000) {
+    projectState.postedReviewKeys = projectState.postedReviewKeys.slice(-1000);
+  }
+}
+
+function isAutomaticReviewReason(reason: ReviewTriggerReason): boolean {
+  return reason === "opened_once" || reason === "on_push";
 }
 
 function shouldReviewOnPrAction(
@@ -577,400 +596,7 @@ function truncate(text: string, max: number): string {
   return `${text.slice(0, max)}\n\n...[truncated]`;
 }
 
-function parseCommentableRightSideLinesFromDiff(diff: string): DiffLineIndex {
-  const lines = diff.split(/\r?\n/);
-  const index: DiffLineIndex = new Map();
-
-  let currentPath = "";
-  let inHunk = false;
-  let newLine = 0;
-
-  for (const line of lines) {
-    if (line.startsWith("diff --git ")) {
-      currentPath = "";
-      inHunk = false;
-      continue;
-    }
-
-    if (line.startsWith("+++ b/")) {
-      currentPath = line.slice("+++ b/".length).trim();
-      if (!index.has(currentPath)) index.set(currentPath, []);
-      continue;
-    }
-
-    const hunkHeader = line.match(
-      /^@@\s+-\d+(?:,\d+)?\s+\+(\d+)(?:,\d+)?\s+@@/,
-    );
-    if (hunkHeader) {
-      newLine = Number.parseInt(hunkHeader[1] ?? "0", 10);
-      inHunk = true;
-      continue;
-    }
-
-    if (!inHunk || !currentPath) continue;
-    if (line.startsWith("\\ No newline at end of file")) continue;
-
-    const marker = line[0] ?? "";
-    if (marker === " " || marker === "+") {
-      const entry = index.get(currentPath);
-      if (entry) entry.push(newLine);
-      newLine += 1;
-      continue;
-    }
-
-    if (marker === "-") {
-      continue;
-    }
-
-    inHunk = false;
-  }
-
-  return index;
-}
-
-function resolveClosestCommentableLine(
-  lineIndex: DiffLineIndex,
-  path: string,
-  requestedLine: number,
-): number | null {
-  if (!Number.isFinite(requestedLine) || requestedLine <= 0) return null;
-
-  const lines = lineIndex.get(path);
-  if (!lines || lines.length === 0) return null;
-  if (lines.includes(requestedLine)) return requestedLine;
-  return null;
-}
-
-function extractJsonPayload(raw: string): string | null {
-  const fencedJson = raw.match(/```json\s*([\s\S]*?)```/i)?.[1]?.trim();
-  if (fencedJson) return fencedJson;
-
-  const fencedAny = raw.match(/```\s*([\s\S]*?)```/)?.[1]?.trim();
-  if (fencedAny && (fencedAny.startsWith("{") || fencedAny.startsWith("[")))
-    return fencedAny;
-
-  const trimmed = raw.trim();
-  if (trimmed.startsWith("{") || trimmed.startsWith("[")) return trimmed;
-
-  const firstBracket = raw.indexOf("[");
-  const lastBracket = raw.lastIndexOf("]");
-  if (firstBracket >= 0 && lastBracket > firstBracket) {
-    return raw.slice(firstBracket, lastBracket + 1).trim();
-  }
-
-  const firstBrace = raw.indexOf("{");
-  const lastBrace = raw.lastIndexOf("}");
-  if (firstBrace >= 0 && lastBrace > firstBrace) {
-    return raw.slice(firstBrace, lastBrace + 1).trim();
-  }
-
-  return null;
-}
-
-function normalizeStructuredReviewComments(
-  parsedObject: StructuredReviewOutput,
-): StructuredReviewComment[] {
-  if (Array.isArray(parsedObject.findings)) {
-    return parsedObject.findings as StructuredReviewComment[];
-  }
-  return [];
-}
-
-function normalizeFindingSeverity(value: unknown): FindingSeverity | null {
-  if (typeof value !== "string") return null;
-  const normalized = value.trim().toLowerCase();
-  if (normalized === "small") return "Small";
-  if (normalized === "medium") return "Medium";
-  if (normalized === "high") return "High";
-  return null;
-}
-
-function normalizeInlineFindingBody(params: {
-  path: string;
-  line: number;
-  severity: FindingSeverity | null;
-  baseBody: string;
-}): string {
-  const sanitized = params.baseBody
-    .replace(/(^|\n)\s*-?\s*(line reference|라인 참조)\s*:[^\n]*/gi, "")
-    .replace(/(^|\n)\s*-?\s*(severity|심각도)\s*:[^\n]*/gi, "")
-    .trim();
-
-  const compact = sanitized.replace(/\s+/g, " ").trim();
-  const summary = compact
-    ? compact.length > 180
-      ? `${compact.slice(0, 177)}...`
-      : compact
-    : "Line-level issue detected in the referenced diff.";
-
-  const hasEvidence = /(^|\n)\s*-\s*Evidence\s*:/i.test(sanitized);
-  const hasRisk = /(^|\n)\s*-\s*Risk\s*:/i.test(sanitized);
-  const hasRecommendation = /(^|\n)\s*-\s*Recommendation\s*:/i.test(sanitized);
-  const structuredDetails =
-    hasEvidence && hasRisk && hasRecommendation
-      ? sanitized
-      : [
-          `- Evidence: ${compact || "Potential issue identified in the referenced line."}`,
-          "- Risk: The current implementation can introduce incorrect behavior or maintenance risk.",
-          "- Recommendation: Revisit this line-level logic and apply a targeted fix.",
-        ].join("\n");
-
-  return [
-    "🧠 ReviewFlux Review",
-    "",
-    "### Summary",
-    summary,
-    "",
-    "### Findings (ordered by severity)",
-    "",
-    `- Severity: [${params.severity ?? "Medium"}]`,
-    structuredDetails,
-    "",
-    "### Verification Notes",
-    "- Verified: Static review of the referenced diff line.",
-    "- Not Verified: Runtime execution and full integration behavior were not validated in this inline context.",
-  ].join("\n");
-}
-
-function parseStrictPositiveLine(value: unknown): number | null {
-  if (typeof value === "number") {
-    return Number.isInteger(value) && value > 0 ? value : null;
-  }
-  if (typeof value === "string") {
-    const trimmed = value.trim();
-    if (!/^\d+$/.test(trimmed)) return null;
-    const parsed = Number.parseInt(trimmed, 10);
-    return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
-  }
-  return null;
-}
-
-function parseStructuredReviewOutput(
-  raw: string,
-): ParsedStructuredReview | null {
-  const payload = extractJsonPayload(raw);
-  if (!payload) return null;
-
-  let parsedValue: unknown;
-  try {
-    parsedValue = JSON.parse(payload);
-  } catch {
-    return null;
-  }
-
-  const parsedObject: StructuredReviewOutput =
-    parsedValue &&
-    typeof parsedValue === "object" &&
-    !Array.isArray(parsedValue)
-      ? (parsedValue as StructuredReviewOutput)
-      : {};
-
-  const bodyFromModel =
-    typeof parsedObject.body === "string" ? parsedObject.body.trim() : "";
-
-  const commentsRaw = normalizeStructuredReviewComments(parsedObject);
-  const inlineComments: InlineReviewComment[] = [];
-  const findingBodies: string[] = [];
-  for (const finding of commentsRaw) {
-    const pathRaw = typeof finding.path === "string" ? finding.path.trim() : "";
-    const line = parseStrictPositiveLine(finding.line);
-    const body = typeof finding.body === "string" ? finding.body.trim() : "";
-    if (!body) continue;
-    findingBodies.push(body);
-
-    const severity = normalizeFindingSeverity(finding.severity);
-    const hasLocation = pathRaw.length > 0 && line !== null;
-
-    if (!hasLocation || line === null) continue;
-    const normalizedBody = normalizeInlineFindingBody({
-      path: pathRaw,
-      line,
-      severity,
-      baseBody: body,
-    });
-    inlineComments.push({
-      path: pathRaw,
-      line,
-      body: normalizedBody,
-    });
-  }
-
-  if (!bodyFromModel && findingBodies.length === 0) return null;
-
-  return { body: bodyFromModel || null, inlineComments, findingBodies };
-}
-
-function buildBodyFromInlineComments(
-  inlineComments: InlineReviewComment[],
-): string {
-  const top = inlineComments.slice(0, 3).map((item) => {
-    const compact = item.body.replace(/\s+/g, " ").trim();
-    const short =
-      compact.length > 180 ? `${compact.slice(0, 177)}...` : compact;
-    return `- ${item.path}:${item.line} ${short}`;
-  });
-
-  const summary =
-    top.length > 0
-      ? [
-          "Potential issues were detected from structured findings.",
-          ...top,
-        ].join("\n")
-      : "Potential issues were detected from structured findings.";
-
-  return [
-    "🧠 ReviewFlux Review",
-    "",
-    "### Summary",
-    summary,
-    "",
-    "### Verification Notes",
-    "- Verified: Parsed structured findings (path/line/body) from model output.",
-    "- Not Verified: Model-provided top-level body format.",
-  ].join("\n");
-}
-
-function buildBodyFromGeneralFindings(findingBodies: string[]): string {
-  const top = findingBodies.slice(0, 3).map((body) => {
-    const compact = body.replace(/\s+/g, " ").trim();
-    return compact.length > 220 ? `${compact.slice(0, 217)}...` : compact;
-  });
-
-  const summary = [
-    "Potential issues were reported from structured findings.",
-    ...top.map((item) => `- ${item}`),
-  ].join("\n");
-
-  return [
-    "🧠 ReviewFlux Review",
-    "",
-    "### Summary",
-    summary,
-    "",
-    "### Verification Notes",
-    "- Verified: Parsed structured finding bodies from model output.",
-    "- Not Verified: Exact inline path/line anchors were not available.",
-  ].join("\n");
-}
-
-function buildNoIssueBody(): string {
-  return [
-    "🧠 ReviewFlux Review",
-    "",
-    "### Summary",
-    "Great news - no actionable issues were found in this PR.",
-    "",
-    "### Verification Notes",
-    "- Verified: Structured review completed without findings.",
-    "- Not Verified: Runtime behavior beyond static/diff-level review.",
-  ].join("\n");
-}
-
-function isStrictReviewBody(body: string): boolean {
-  const trimmed = body.trim();
-  if (!trimmed.startsWith("🧠 ReviewFlux Review\n\n### Summary")) return false;
-
-  const summaryIndex = trimmed.indexOf("\n### Summary");
-  const findingsIndex = trimmed.indexOf("\n### Findings");
-  const verificationIndex = trimmed.indexOf("\n### Verification Notes");
-  if (summaryIndex < 0 || verificationIndex < 0) return false;
-  if (findingsIndex >= 0) {
-    return summaryIndex < findingsIndex && findingsIndex < verificationIndex;
-  }
-  return summaryIndex < verificationIndex;
-}
-
-function sanitizeModelOutputForFallback(raw: string): string {
-  const source = resolveFallbackSourceText(raw);
-  return source
-    .replace(/```json/gi, " ")
-    .replace(/```/g, " ")
-    .replace(/[{}\[\]"]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function resolveFallbackSourceText(raw: string): string {
-  const payload = extractJsonPayload(raw);
-  if (!payload) {
-    const looseFromRaw = extractLooseBodyText(raw);
-    return looseFromRaw ?? raw;
-  }
-
-  try {
-    const parsed = JSON.parse(payload) as {
-      body?: unknown;
-      findings?: unknown;
-    };
-
-    if (typeof parsed.body === "string" && parsed.body.trim().length > 0) {
-      return parsed.body.trim();
-    }
-
-    if (Array.isArray(parsed.findings)) {
-      const findingBodies = parsed.findings
-        .map((item) => {
-          if (!item || typeof item !== "object") return "";
-          const finding = item as { body?: unknown };
-          return typeof finding.body === "string" ? finding.body.trim() : "";
-        })
-        .filter((text) => text.length > 0);
-      if (findingBodies.length > 0) {
-        return findingBodies.join("\n");
-      }
-    }
-  } catch {
-    const looseFromPayload = extractLooseBodyText(payload);
-    return looseFromPayload ?? payload;
-  }
-
-  const looseFromPayload = extractLooseBodyText(payload);
-  return looseFromPayload ?? payload;
-}
-
-function extractLooseBodyText(input: string): string | null {
-  const bodyMatch = input.match(
-    /["']?body["']?\s*:\s*([\s\S]*?)(?:,\s*["']?findings["']?\s*:|\}\s*$|$)/i,
-  );
-  if (!bodyMatch?.[1]) return null;
-
-  const rawValue = bodyMatch[1].trim();
-  if (!rawValue) return null;
-
-  const unwrapped = rawValue.replace(/^["']|["']$/g, "").trim();
-  return unwrapped
-    .replace(/\\n/g, "\n")
-    .replace(/\\t/g, "\t")
-    .replace(/\\"/g, '"')
-    .replace(/\\\\/g, "\\")
-    .trim();
-}
-
-function buildBestEffortFallbackBody(params: {
-  raw: string;
-  reason: string;
-}): string {
-  const sanitized = sanitizeModelOutputForFallback(params.raw);
-  const summary =
-    sanitized.length > 0
-      ? sanitized.length > 360
-        ? `${sanitized.slice(0, 357)}...`
-        : sanitized
-      : "Review generation completed, but model output did not contain parsable analysis text.";
-
-  return [
-    "🧠 ReviewFlux Review",
-    "",
-    "### Summary",
-    summary,
-    "",
-    "### Verification Notes",
-    "- Verified: Best-effort rendering from model output text.",
-    `- Not Verified: ${params.reason}`,
-  ].join("\n");
-}
-
-function buildReviewSystemPrompt(params: {
+export function buildReviewSystemPrompt(params: {
   repo: string;
   prNumber: number;
   reason: ReviewTriggerReason;
@@ -978,18 +604,23 @@ function buildReviewSystemPrompt(params: {
 }): string {
   return [
     "You are the ReviewFlux PR review assistant.",
-    "Write concise, actionable review comments focused on correctness, risk, and maintainability.",
-    "Output must be exactly one JSON object. Do not output markdown, explanations, or code fences.",
-    "Return valid JSON only, with no prefix/suffix text before or after the object.",
-    "Follow the output contract (JSON schema) as the highest priority.",
-    "If project guidance (AGENTS.md/context) is provided, apply it while preserving the output contract.",
+    "Write concise, actionable findings focused on correctness and maintainability.",
+    "Your response is parsed by JSON.parse in production. Any non-JSON text causes a contract failure.",
+    "Output must be exactly one JSON object with this shape:",
+    '{"findings":[{"path":"string","line":123,"body":"string","severity":"Small|Medium|High"}]}',
+    "Always include the `findings` key. If there are no actionable issues, return exactly {\"findings\":[]}.",
+    "For anchored findings, `path` must be a changed file path from the diff and `line` must be a positive integer.",
+    "For non-anchored findings, set path to \"\" and line to \"\".",
+    "Each finding `body` must be markdown text with these sections in order: `🧠 ReviewFlux Review`, `### Summary`, `### Findings (ordered by severity)`, `### Verification Notes`.",
+    "Do not output any text outside the single JSON object. Markdown is allowed only inside `body` string values.",
+    "If project guidance (AGENTS.md/context) is provided, apply it while preserving this JSON contract.",
     ...(params.basePolicyGuidance
       ? [
           "Base review role/principles (from REVIEWFLUX-AGENTS.md):",
           params.basePolicyGuidance,
         ]
       : []),
-    "Do not default line numbers to 1. Use exact changed-line numbers from the provided diff.",
+    "Do not fabricate line numbers. Use exact changed-line numbers from the provided diff only.",
     "Do not output placeholder/meta text like [Pasted ...], ..., TBD, N/A, or <...>.",
     `Repository: ${params.repo}`,
     `Pull Request: #${params.prNumber}`,
@@ -997,7 +628,7 @@ function buildReviewSystemPrompt(params: {
   ].join("\n");
 }
 
-function buildReviewUserPrompt(params: {
+export function buildReviewUserPrompt(params: {
   pr: PullRequestDetail;
   diff: string;
   globalAgentsGuidance: string;
@@ -1028,54 +659,24 @@ function buildReviewUserPrompt(params: {
     truncate(params.diff, MAX_DIFF_CHARS),
     "",
     "Use the role/core principles from REVIEWFLUX-AGENTS.md provided in system prompt.",
-    "Prioritize findings JSON extraction over markdown body formatting.",
-    "## Review Output Contract",
-    "- The first line must match this exact string:",
-    "  - 🧠 ReviewFlux Review",
-    "- Add one blank line after the first line, then follow this section order:",
-    "  1. ### Summary",
-    "  2. ### Findings (ordered by severity) (only when issues exist)",
-    "  3. ### Verification Notes",
-    "- If there are no issues, omit the `### Findings` section.",
-    "- Severity must be one of `[Small]`, `[Medium]`, `[High]`.",
-    "- For line-specific findings, `path` must match an actual changed file in the PR diff.",
-    "- For line-specific findings, `line` must be an exact commentable right-side line from the PR diff hunk.",
-    "- Never use placeholder/default line numbers (for example `1`) unless the real issue is actually at that line.",
-    "- If exact location cannot be verified from the diff, do not fabricate location data; keep it as a non-inline/general comment.",
-    "- Do not output placeholder/meta text such as `[Pasted ...]`, `...`, `TBD`, `N/A`, `<...>`.",
-    "- If information is unavailable, write `Not Verified: <reason>` with a concrete reason.",
-    "",
-    "Strict body template:",
-    "🧠 ReviewFlux Review",
-    "",
-    "### Summary",
-    "",
-    "Write the overall judgment in 2-4 lines.",
-    "",
-    "### Findings (ordered by severity) <- only when issues exist",
-    "",
-    "- Severity: [Small]/[Medium]/[High]",
-    "- Evidence: <specific file/function evidence>",
-    "- Risk: <concrete impact if not fixed>",
-    "- Recommendation: <specific fix direction>",
-    "",
-    "### Verification Notes",
-    "",
-    "- Verified: items actually validated from tests/types/build/static review",
-    "- Not Verified: items not validated and why",
-    "",
-    "Use path and line only when you can confidently anchor to a changed line in the diff.",
-    "If a finding is not tied to a specific line, use empty path and empty line for that finding.",
-    "Return only JSON with this schema (minimum required keys are path/line/body):",
+    "Return one JSON object only. Do not return markdown or prose outside JSON.",
+    "Output schema:",
     "{",
-    '  "body": "string (optional)",',
     '  "findings": [',
-    '    { "path": "src/file.ts", "line": 128, "body": "- Evidence: ...\\n- Risk: ...\\n- Recommendation: ...", "severity": "Small|Medium|High (optional)" },',
-    '    { "path": "", "line": "", "body": "General finding without a line anchor", "severity": "Small|Medium|High (optional)" }',
+    '    { "path": "src/file.ts", "line": 128, "body": "🧠 ReviewFlux Review\\n\\n### Summary\\n<summary>\\n\\n### Findings (ordered by severity)\\n\\n- Severity: [High]\\n- Detail: ...\\n\\n### Verification Notes\\n- Verified: ...\\n- Not Verified: ...", "severity": "Small|Medium|High" },',
+    '    { "path": "", "line": "", "body": "🧠 ReviewFlux Review\\n\\n### Summary\\n<summary>\\n\\n### Findings (ordered by severity)\\n\\n- Severity: [Medium]\\n- Detail: ...\\n\\n### Verification Notes\\n- Verified: ...\\n- Not Verified: ...", "severity": "Small|Medium|High" }',
     "  ]",
     "}",
-    "If there is no issue, return findings as an empty array.",
-    "Do not wrap JSON in code fences.",
+    "Rules:",
+    "- Sort findings by severity: High -> Medium -> Small.",
+    "- For anchored findings, path must match a changed file in the diff and line must be an exact changed right-side line.",
+    "- Never use fabricated/default line numbers.",
+    "- If exact location is unclear, set path to \"\" and line to \"\".",
+    "- Each finding body must include `🧠 ReviewFlux Review` + `### Summary` + `### Findings (ordered by severity)` + `### Verification Notes` in this order.",
+    "- In `### Findings (ordered by severity)`, include `- Severity` and at least one concrete `- Detail` bullet.",
+    "- If there are no actionable issues, return exactly {\"findings\":[]}.",
+    "- Do not output placeholder/meta text such as [Pasted ...], ..., TBD, N/A, or <...>.",
+    "- Do not wrap JSON in code fences.",
   ].join("\n");
 }
 
@@ -1201,78 +802,13 @@ async function postInlineReviewComment(params: {
   );
 }
 
-async function postReviewOutput(params: {
-  repo: string;
-  prNumber: number;
-  prHeadSha: string;
-  body: string;
-  diff: string;
-  inlineComments?: InlineReviewComment[];
-}): Promise<void> {
-  const lineIndex = parseCommentableRightSideLinesFromDiff(params.diff);
-
-  const context: PublishReviewContext = {
-    repo: params.repo,
-    prNumber: params.prNumber,
-    body: params.body,
-    inlineComments: params.inlineComments,
-  };
-
-  const adapter: ReviewPublisherAdapter = {
-    listChangedPaths: async ({ repo, prNumber }) => {
-      const files = await listPullRequestFiles(repo, prNumber);
-      return files.map((file) => file.filename);
-    },
-    postInlineComment: async (
-      { repo, prNumber },
-      comment: InlineReviewComment,
-    ) => {
-      const line = resolveClosestCommentableLine(
-        lineIndex,
-        comment.path,
-        comment.line,
-      );
-      if (!line) {
-        throw new Error(
-          `no_commentable_line_in_diff:${comment.path}:${comment.line}`,
-        );
-      }
-
-      const resolvedComment: InlineReviewComment = {
-        ...comment,
-        line,
-      };
-      await postInlineReviewComment({
-        repo,
-        prNumber,
-        prHeadSha: params.prHeadSha,
-        comment: resolvedComment,
-      });
-    },
-    postSummaryComment: async ({ repo, prNumber }, body) =>
-      postReviewComment(repo, prNumber, body),
-  };
-
-  await publishReviewWithInlineComments({
-    context,
-    adapter,
-    maxInlineComments: 20,
-    postSummaryWhenInlinePosted: false,
-    onInlineCommentError: (comment, error) => {
-      console.error(
-        `[reviewflux] failed to post inline comment: ${comment.path}:${comment.line}`,
-      );
-      console.error(error instanceof Error ? error.message : String(error));
-    },
-  });
-}
-
 async function triggerReview(params: {
   config: ReviewFluxConfig;
   project: ProjectConfig;
   repo: string;
   prNumber: number;
   reason: ReviewTriggerReason;
+  state?: DaemonState;
   triggerComment?: {
     url?: string;
     author?: string;
@@ -1281,64 +817,97 @@ async function triggerReview(params: {
   const basePolicyGuidance = loadBasePolicyGuidance();
   const globalAgentsGuidance = loadGlobalAgentsGuidance();
   const pr = await fetchPullRequestDetail(params.repo, params.prNumber);
-  let projectContext = "";
-  try {
-    projectContext = await buildRemoteProjectContextText(
-      params.project,
-      pr.base.sha,
-    );
-  } catch (error) {
-    console.error(
-      `[reviewflux] failed to load context for ${params.repo}@${pr.base.sha}`,
-    );
-    console.error(error instanceof Error ? error.message : String(error));
-  }
-
-  const review = await createReviewComment({
-    config: params.config,
-    project: params.project,
-    repo: params.repo,
-    pr,
-    reason: params.reason,
-    basePolicyGuidance,
-    globalAgentsGuidance,
-    projectContext,
-  });
-
-  const structured = parseStructuredReviewOutput(review.raw);
-  let parsedBody = structured
-    ? structured.inlineComments.length > 0
-      ? buildBodyFromInlineComments(structured.inlineComments)
-      : structured.findingBodies.length > 0
-        ? buildBodyFromGeneralFindings(structured.findingBodies)
-        : buildNoIssueBody()
-    : buildBestEffortFallbackBody({
-        raw: review.raw,
-        reason: "invalid model output format (expected structured JSON)",
-      });
-
-  if (params.reason === "manual_force" && params.triggerComment?.url) {
-    const triggerAuthor = params.triggerComment.author?.trim();
-    const triggerPrefix = triggerAuthor
-      ? `Requested by @${triggerAuthor}: ${params.triggerComment.url}`
-      : `Requested via trigger comment: ${params.triggerComment.url}`;
-    parsedBody = parsedBody.replace(
-      "### Summary\n",
-      `### Summary\n${triggerPrefix}\n\n`,
-    );
-  }
-
-  await postReviewOutput({
-    repo: params.repo,
+  const state = params.state ?? loadDaemonState();
+  const projectState = buildProjectState(state, params.repo);
+  const reviewKey = buildPostedReviewKey({
     prNumber: params.prNumber,
     prHeadSha: pr.head.sha,
-    body: parsedBody,
-    diff: review.diff,
-    inlineComments: structured?.inlineComments,
+    reason: params.reason,
   });
-  console.log(
-    `[reviewflux] review posted: ${params.repo}#${params.prNumber} reason=${params.reason}`,
-  );
+  if (
+    isAutomaticReviewReason(params.reason) &&
+    hasPostedReviewKey({
+      postedReviewKeys: projectState.postedReviewKeys,
+      prNumber: params.prNumber,
+      prHeadSha: pr.head.sha,
+      reason: params.reason,
+    })
+  ) {
+    console.log(
+      `[reviewflux] review skipped (already posted): ${params.repo}#${params.prNumber} reason=${params.reason}`,
+    );
+    return;
+  }
+  if (inFlightReviewKeys.has(reviewKey)) {
+    console.log(
+      `[reviewflux] review skipped (in-flight duplicate): ${params.repo}#${params.prNumber} reason=${params.reason}`,
+    );
+    return;
+  }
+  inFlightReviewKeys.add(reviewKey);
+
+  try {
+    let projectContext = "";
+    try {
+      projectContext = await buildRemoteProjectContextText(
+        params.project,
+        pr.base.sha,
+      );
+    } catch (error) {
+      console.error(
+        `[reviewflux] failed to load context for ${params.repo}@${pr.base.sha}`,
+      );
+      console.error(error instanceof Error ? error.message : String(error));
+    }
+
+    const review = await createReviewComment({
+      config: params.config,
+      project: params.project,
+      repo: params.repo,
+      pr,
+      reason: params.reason,
+      basePolicyGuidance,
+      globalAgentsGuidance,
+      projectContext,
+    });
+
+    const resolvedReview = resolveReviewOutputFromModel(review.raw);
+    let parsedBody = resolvedReview.body;
+
+    if (params.reason === "manual_force" && params.triggerComment?.url) {
+      const triggerAuthor = params.triggerComment.author?.trim();
+      const triggerPrefix = triggerAuthor
+        ? `Requested by @${triggerAuthor}: ${params.triggerComment.url}`
+        : `Requested via trigger comment: ${params.triggerComment.url}`;
+      parsedBody = parsedBody.replace(
+        "### Summary\n",
+        `### Summary\n${triggerPrefix}\n\n`,
+      );
+    }
+
+    await postReviewOutput({
+      repo: params.repo,
+      prNumber: params.prNumber,
+      prHeadSha: pr.head.sha,
+      body: parsedBody,
+      diff: review.diff,
+      inlineComments: resolvedReview.inlineComments,
+      listPullRequestFiles,
+      postReviewComment,
+      postInlineReviewComment,
+    });
+    if (isAutomaticReviewReason(params.reason)) {
+      trackPostedReviewKey(projectState, reviewKey);
+    }
+    if (!params.state && isAutomaticReviewReason(params.reason)) {
+      saveDaemonState(state);
+    }
+    console.log(
+      `[reviewflux] review posted: ${params.repo}#${params.prNumber} reason=${params.reason}`,
+    );
+  } finally {
+    inFlightReviewKeys.delete(reviewKey);
+  }
 }
 
 export async function runQueuedReviewJob(params: {
@@ -1407,6 +976,7 @@ async function pollProject(params: {
           repo,
           prNumber: pr.number,
           reason: resolveReasonForPrAction(project, "opened"),
+          state,
         });
       }
       projectState.prHeads[prNum] = pr.head.sha;
@@ -1421,6 +991,7 @@ async function pollProject(params: {
           repo,
           prNumber: pr.number,
           reason: resolveReasonForPrAction(project, "synchronize"),
+          state,
         });
       }
       projectState.prHeads[prNum] = pr.head.sha;
@@ -1455,6 +1026,7 @@ async function pollProject(params: {
       repo,
       prNumber: issue.number,
       reason: "manual_force",
+      state,
     });
     trackSeenCommentId(projectState, seenId);
   }
@@ -1476,6 +1048,7 @@ async function pollProject(params: {
       repo,
       prNumber,
       reason: "manual_force",
+      state,
     });
     trackSeenCommentId(projectState, seenId);
   }
