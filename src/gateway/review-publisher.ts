@@ -49,11 +49,7 @@ function isInlineReviewComment(
 }
 
 function buildNoIssueBody(): string {
-  return [
-    REVIEW_TITLE,
-    "",
-    "Great news - no actionable issues were found in this PR. 👍",
-  ].join("\n");
+  return "Great news - no actionable issues were found in this PR. 👍";
 }
 
 function stripLeadingReviewTitle(body: string): string {
@@ -198,9 +194,7 @@ export async function publishReviewWithInlineComments(params: {
   }
 
   if (params.postSummaryWhenInlinePosted) {
-    const inlineSummaryBody = buildTopLevelCommentBody(
-      postedInline,
-    );
+    const inlineSummaryBody = buildTopLevelCommentBody(postedInline);
     await adapter.postSummaryComment(context, inlineSummaryBody);
   }
   return {

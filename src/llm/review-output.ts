@@ -173,14 +173,6 @@ function extractLooseBodyText(input: string): string | null {
     .trim();
 }
 
-function buildNoIssueBody(): string {
-  return [
-    "🧠 ReviewFlux Review",
-    "",
-    "Great news - no actionable issues were found in this PR. 👍",
-  ].join("\n");
-}
-
 function hasNoFindingHint(raw: string): boolean {
   const sanitized = sanitizeModelOutputForFallback(raw).toLowerCase();
   const noFindingHintPattern =
@@ -192,13 +184,7 @@ function buildInvalidFormatFallbackBody(params: {
   raw: string;
   reason: string;
 }): string {
-  if (hasNoFindingHint(params.raw)) {
-    return buildNoIssueBody();
-  }
-
   return [
-    "🧠 ReviewFlux Review",
-    "",
     "### Summary",
     "Review completed, but the model output format was invalid. Detailed findings are skipped for this run.",
     "",
