@@ -1,4 +1,4 @@
-import { type InlineReviewComment } from "../gateway/review-publisher.js";
+import { type ReviewFinding } from "../gateway/review-publisher.js";
 
 type StructuredReviewComment = {
   path?: unknown;
@@ -9,22 +9,6 @@ type StructuredReviewComment = {
 type StructuredReviewOutput = {
   body?: unknown;
   findings?: unknown;
-};
-
-type ParsedStructuredReview = {
-  /**
-   * bodyFromModel is the full review body directly provided by the model in JSON, and when the value is empty, it is converted to null to consistently represent “no body provided.”
-   */
-  body: string | null;
-  /**
-   * inlineComments is the subset of findings that can be posted as GitHub inline comments (valid path + line + body).
-   */
-  inlineComments: InlineReviewComment[];
-  /**
-   * findingBodies is the list of non-empty finding texts used for summary fallback when inline anchoring is unavailable.
-   * Inline anchoring: path/line mapping that lets GitHub place a comment on a specific changed line in the diff.
-   */
-  findingBodies: string[];
 };
 
 function extractJsonPayload(raw: string): string | null {
@@ -76,7 +60,7 @@ function parseStrictPositiveLine(value: unknown): number | null {
   return null;
 }
 
-function parseStructuredReviewOutput(raw: string): ParsedStructuredReview | null {
+function parseStructuredReviewOutput(raw: string): ReviewFinding[] | null {
   const payload = extractJsonPayload(raw);
   if (!payload) return null;
 
@@ -101,122 +85,25 @@ function parseStructuredReviewOutput(raw: string): ParsedStructuredReview | null
   const hasFindingsArray = hasFindingsField && Array.isArray(parsedObject.findings);
   if (!hasFindingsArray) return null;
 
-  const bodyFromModel =
-    typeof parsedObject.body === "string" ? parsedObject.body.trim() : "";
-
   const commentsRaw = normalizeStructuredReviewComments(parsedObject);
-  const inlineComments: InlineReviewComment[] = [];
-  const findingBodies: string[] = [];
+  const findings: ReviewFinding[] = [];
   for (const finding of commentsRaw) {
     const pathRaw = typeof finding.path === "string" ? finding.path.trim() : "";
     const line = parseStrictPositiveLine(finding.line);
     const body = typeof finding.body === "string" ? finding.body.trim() : "";
     if (!body) continue;
-    findingBodies.push(body);
-    const hasLocation = pathRaw.length > 0 && line !== null;
 
-    if (!hasLocation || line === null) continue;
-    inlineComments.push({
-      path: pathRaw,
-      line,
+    const hasLocation = pathRaw.length > 0 && line !== null;
+    findings.push({
+      path: hasLocation ? pathRaw : "",
+      line: hasLocation && line !== null ? line : "",
       body,
     });
   }
 
-  return { body: bodyFromModel || null, inlineComments, findingBodies };
-}
+  if (commentsRaw.length > 0 && findings.length === 0) return null;
 
-function buildBodyFromInlineComments(inlineComments: InlineReviewComment[]): string {
-  const top = inlineComments.slice(0, 3).map((item) => {
-    const compact = extractFindingDigest(item.body, 180);
-    const short = compact.length > 0 ? compact : "Line-level finding";
-    return `${item.path}:${item.line} ${short}`;
-  });
-
-  const findings =
-    top.length > 0
-      ? top.map((item) => `- ${item}`).join("\n")
-      : "- Line-specific findings were detected; see inline comments for details.";
-
-  return [
-    "🧠 ReviewFlux Review",
-    "",
-    "### Summary",
-    "Potential issues were detected from structured findings.",
-    "",
-    "### Findings (ordered by severity)",
-    findings,
-    "",
-    "### Verification Notes",
-    "- Verified: Parsed structured findings (path/line/body) from model output.",
-    "- Not Verified: Model-provided top-level body format.",
-  ].join("\n");
-}
-
-function extractSummaryFromStrictReviewBody(body: string): string | null {
-  const trimmed = body.trim();
-  if (!isStrictReviewBody(trimmed)) return null;
-
-  const summaryMatch = trimmed.match(/### Summary\s*\n([\s\S]*?)(?:\n###\s|$)/);
-  const summary = summaryMatch?.[1]?.replace(/\s+/g, " ").trim();
-  return summary || null;
-}
-
-function extractFindingDigest(body: string, maxChars: number): string {
-  const fromStrictSummary = extractSummaryFromStrictReviewBody(body);
-  const compact = (fromStrictSummary ?? body).replace(/\s+/g, " ").trim();
-  if (!compact) return "";
-  return compact.length > maxChars
-    ? `${compact.slice(0, Math.max(0, maxChars - 3))}...`
-    : compact;
-}
-
-function buildBodyFromGeneralFindings(findingBodies: string[]): string {
-  const top = findingBodies
-    .slice(0, 3)
-    .map((body) => extractFindingDigest(body, 220))
-    .filter((item) => item.length > 0);
-
-  const findings =
-    top.length > 0
-      ? top.map((item) => `- ${item}`).join("\n")
-      : "- General findings were reported, but no summary details were extracted.";
-
-  return [
-    "🧠 ReviewFlux Review",
-    "",
-    "### Summary",
-    "Potential issues were reported from structured findings.",
-    "",
-    "### Findings (ordered by severity)",
-    findings,
-    "",
-    "### Verification Notes",
-    "- Verified: Parsed structured finding bodies from model output.",
-    "- Not Verified: Exact inline path/line anchors were not available.",
-  ].join("\n");
-}
-
-function buildNoIssueBody(): string {
-  return [
-    "🧠 ReviewFlux Review",
-    "",
-    "Great news - no actionable issues were found in this PR. 👍",
-  ].join("\n");
-}
-
-function isStrictReviewBody(body: string): boolean {
-  const trimmed = body.trim();
-  if (!trimmed.startsWith("🧠 ReviewFlux Review\n\n### Summary")) return false;
-
-  const summaryIndex = trimmed.indexOf("\n### Summary");
-  const findingsIndex = trimmed.indexOf("\n### Findings");
-  const verificationIndex = trimmed.indexOf("\n### Verification Notes");
-  if (summaryIndex < 0 || verificationIndex < 0) return false;
-  if (findingsIndex >= 0) {
-    return summaryIndex < findingsIndex && findingsIndex < verificationIndex;
-  }
-  return summaryIndex < verificationIndex;
+  return findings;
 }
 
 function sanitizeModelOutputForFallback(raw: string): string {
@@ -285,11 +172,26 @@ function extractLooseBodyText(input: string): string | null {
     .trim();
 }
 
-function buildBestEffortFallbackBody(params: { raw: string; reason: string }): string {
-  const sanitized = sanitizeModelOutputForFallback(params.raw).toLowerCase();
+function buildNoIssueBody(): string {
+  return [
+    "🧠 ReviewFlux Review",
+    "",
+    "Great news - no actionable issues were found in this PR. 👍",
+  ].join("\n");
+}
+
+function hasNoFindingHint(raw: string): boolean {
+  const sanitized = sanitizeModelOutputForFallback(raw).toLowerCase();
   const noFindingHintPattern =
-    /(\bno\s+actionable\s+issues?\b|\bno\s+issues?\b|\bno\s+findings?\b|\bnothing\s+to\s+review\b|\blgtm\b|문제\s*없|이슈\s*없|특이사항\s*없|리뷰할\s*게\s*없|이상\s*없)/i;
-  if (sanitized.length > 0 && noFindingHintPattern.test(sanitized)) {
+    /^(?:(?:lgtm|looks good to me)\s*[.!-]*\s*)?(?:no\s+actionable\s+issues?(?:\s+found)?|no\s+issues?(?:\s+found)?|no\s+findings?(?:\s+found)?|nothing\s+to\s+review|문제\s*없|이슈\s*없|특이사항\s*없|리뷰할\s*게\s*없|이상\s*없)[.!\s]*$/i;
+  return sanitized.length > 0 && noFindingHintPattern.test(sanitized);
+}
+
+function buildInvalidFormatFallbackBody(params: {
+  raw: string;
+  reason: string;
+}): string {
+  if (hasNoFindingHint(params.raw)) {
     return buildNoIssueBody();
   }
 
@@ -305,37 +207,37 @@ function buildBestEffortFallbackBody(params: { raw: string; reason: string }): s
   ].join("\n");
 }
 
+/**
+ * Normalize the raw model response into a single canonical findings array.
+ *
+ * Each finding keeps the `{ path, line, body }` shape all the way to the posting layer.
+ * Unanchored findings use `path: ""` and `line: ""`.
+ *
+ * @param raw Raw LLM response text.
+ * @returns Canonical review findings ready for posting-time classification.
+ */
 export function resolveReviewOutputFromModel(raw: string): {
-  body: string;
-  inlineComments: InlineReviewComment[];
+  findings: ReviewFinding[];
 } {
-  const structured = parseStructuredReviewOutput(raw);
-  if (!structured) {
+  const findings = parseStructuredReviewOutput(raw);
+  if (!findings) {
+    if (hasNoFindingHint(raw)) {
+      return { findings: [] };
+    }
+
     return {
-      body: buildBestEffortFallbackBody({
-        raw,
-        reason: "invalid model output format (expected structured JSON)",
-      }),
-      inlineComments: [],
+      findings: [
+        {
+          path: "",
+          line: "",
+          body: buildInvalidFormatFallbackBody({
+            raw,
+            reason: "invalid model output format (expected structured JSON)",
+          }),
+        },
+      ],
     };
   }
 
-  if (structured.inlineComments.length > 0) {
-    return {
-      body: buildBodyFromInlineComments(structured.inlineComments),
-      inlineComments: structured.inlineComments,
-    };
-  }
-
-  if (structured.findingBodies.length > 0) {
-    return {
-      body: buildBodyFromGeneralFindings(structured.findingBodies),
-      inlineComments: [],
-    };
-  }
-
-  return {
-    body: buildNoIssueBody(),
-    inlineComments: [],
-  };
+  return { findings };
 }

@@ -2,40 +2,49 @@ import { describe, expect, it } from "vitest";
 import {
   buildReviewSystemPrompt,
   buildReviewUserPrompt,
-  hasPostedReviewKey,
-} from "../src/commands/daemon/start.js";
+} from "../src/llm/review-prompt.js";
+import { hasPostedReviewKey } from "../src/gateway/review-key.js";
 import { resolveReviewOutputFromModel } from "../src/llm/review-output.js";
 
 describe("daemon review output resolution", () => {
-  it("treats valid empty findings JSON as no-issue review", () => {
+  it("treats valid empty findings JSON as no findings", () => {
     const result = resolveReviewOutputFromModel('{"findings":[]}');
 
-    expect(result.inlineComments).toEqual([]);
-    expect(result.body).toContain(
-      "Great news - no actionable issues were found in this PR.",
-    );
-    expect(result.body).not.toContain("invalid model output format");
+    expect(result.findings).toEqual([]);
   });
 
-  it("renders concise invalid-format fallback without echoing raw body", () => {
+  it("returns a fallback finding when the model output format is invalid", () => {
     const result = resolveReviewOutputFromModel(
       "🧠 ReviewFlux Review\n\n### Summary\nReview output format validation failed.",
     );
 
-    expect(result.inlineComments).toEqual([]);
-    expect(result.body).toContain(
+    expect(result.findings).toHaveLength(1);
+    expect(result.findings[0]).toMatchObject({ path: "", line: "" });
+    expect(result.findings[0]?.body).toContain(
       "Review completed, but the model output format was invalid.",
     );
-    expect(result.body).not.toContain("Best-effort rendering from model output text.");
-    expect(result.body).not.toContain("Review output format validation failed.");
+    expect(result.findings[0]?.body).not.toContain(
+      "Best-effort rendering from model output text.",
+    );
+    expect(result.findings[0]?.body).not.toContain(
+      "Review output format validation failed.",
+    );
   });
 
-  it("maps no-issue hints in malformed output to no-issue body", () => {
+  it("maps no-issue hints in malformed output to no findings", () => {
     const result = resolveReviewOutputFromModel("LGTM. No actionable issues found.");
 
-    expect(result.inlineComments).toEqual([]);
-    expect(result.body).toContain(
-      "Great news - no actionable issues were found in this PR.",
+    expect(result.findings).toEqual([]);
+  });
+
+  it("does not suppress invalid output that mixes LGTM with a real concern", () => {
+    const result = resolveReviewOutputFromModel(
+      "LGTM, but there is still a null guard issue in src/a.ts",
+    );
+
+    expect(result.findings).toHaveLength(1);
+    expect(result.findings[0]?.body).toContain(
+      "Review completed, but the model output format was invalid.",
     );
   });
 
@@ -44,26 +53,40 @@ describe("daemon review output resolution", () => {
       '{"body":"Potential null guard issue in changed path"}',
     );
 
-    expect(result.inlineComments).toEqual([]);
-    expect(result.body).toContain(
+    expect(result.findings).toHaveLength(1);
+    expect(result.findings[0]?.body).toContain(
       "Review completed, but the model output format was invalid.",
     );
-    expect(result.body).not.toContain(
-      "Great news - no actionable issues were found in this PR.",
+    expect(result.findings[0]).toMatchObject({ path: "", line: "" });
+  });
+
+  it("treats all-invalid findings arrays as invalid structured output", () => {
+    const result = resolveReviewOutputFromModel(
+      '{"findings":[{"path":"src/a.ts","line":12,"body":"   "}]}',
+    );
+
+    expect(result.findings).toHaveLength(1);
+    expect(result.findings[0]).toMatchObject({ path: "", line: "" });
+    expect(result.findings[0]?.body).toContain(
+      "Review completed, but the model output format was invalid.",
     );
   });
 
-  it("includes Findings section when line-anchored findings exist", () => {
+  it("preserves line-anchored findings in canonical form", () => {
     const result = resolveReviewOutputFromModel(
       '{"findings":[{"path":"src/a.ts","line":12,"body":"- Detail: null guard missing around this branch","severity":"High"}]}',
     );
 
-    expect(result.inlineComments.length).toBe(1);
-    expect(result.body).toContain("### Findings (ordered by severity)");
-    expect(result.body).toContain("src/a.ts:12");
+    expect(result.findings).toEqual([
+      {
+        path: "src/a.ts",
+        line: 12,
+        body: "- Detail: null guard missing around this branch",
+      },
+    ]);
   });
 
-  it("preserves inline finding body from model output", () => {
+  it("preserves anchored finding body from model output", () => {
     const findingBody =
       "- Detail: possible null dereference in this branch";
     const result = resolveReviewOutputFromModel(
@@ -79,12 +102,11 @@ describe("daemon review output resolution", () => {
       }),
     );
 
-    expect(result.inlineComments.length).toBe(1);
-    const inlineBody = result.inlineComments[0]?.body ?? "";
-    expect(inlineBody).toBe(findingBody);
+    expect(result.findings).toHaveLength(1);
+    expect(result.findings[0]?.body).toBe(findingBody);
   });
 
-  it("does not double-wrap when finding body already has full section template", () => {
+  it("preserves strict review bodies without double-wrapping them", () => {
     const findingBody = [
       "🧠 ReviewFlux Review",
       "",
@@ -114,23 +136,26 @@ describe("daemon review output resolution", () => {
       }),
     );
 
-    expect(result.inlineComments.length).toBe(1);
-    const inlineBody = result.inlineComments[0]?.body ?? "";
-    expect(inlineBody).toBe(findingBody);
-    expect((inlineBody.match(/🧠 ReviewFlux Review/g) ?? []).length).toBe(1);
+    expect(result.findings).toHaveLength(1);
+    expect(result.findings[0]?.body).toBe(findingBody);
+    expect((result.findings[0]?.body.match(/🧠 ReviewFlux Review/g) ?? []).length).toBe(1);
   });
 
-  it("includes Findings section for general findings without line anchors", () => {
+  it("normalizes general findings without anchors", () => {
     const result = resolveReviewOutputFromModel(
       '{"findings":[{"path":"","line":"","body":"General finding without an anchor","severity":"Medium"}]}',
     );
 
-    expect(result.inlineComments).toEqual([]);
-    expect(result.body).toContain("### Findings (ordered by severity)");
-    expect(result.body).toContain("General finding without an anchor");
+    expect(result.findings).toEqual([
+      {
+        path: "",
+        line: "",
+        body: "General finding without an anchor",
+      },
+    ]);
   });
 
-  it("uses summary digest for structured finding bodies in general findings", () => {
+  it("keeps structured finding bodies for later posting-time rendering", () => {
     const structured = [
       "🧠 ReviewFlux Review",
       "",
@@ -160,9 +185,13 @@ describe("daemon review output resolution", () => {
       }),
     );
 
-    expect(result.inlineComments).toEqual([]);
-    expect(result.body).toContain("Digest target summary");
-    expect((result.body.match(/🧠 ReviewFlux Review/g) ?? []).length).toBe(1);
+    expect(result.findings).toEqual([
+      {
+        path: "",
+        line: "",
+        body: structured,
+      },
+    ]);
   });
 });
 

@@ -2,6 +2,7 @@ import {
   publishReviewWithInlineComments,
   type InlineReviewComment,
   type PublishReviewContext,
+  type ReviewFinding,
   type ReviewPublisherAdapter,
 } from "./review-publisher.js";
 
@@ -61,7 +62,7 @@ function parseCommentableRightSideLinesFromDiff(diff: string): DiffLineIndex {
   return index;
 }
 
-function resolveClosestCommentableLine(
+function resolveExactCommentableLine(
   lineIndex: DiffLineIndex,
   path: string,
   requestedLine: number,
@@ -78,9 +79,9 @@ export async function postReviewOutput(params: {
   repo: string;
   prNumber: number;
   prHeadSha: string;
-  body: string;
+  findings?: ReviewFinding[];
+  summaryPrefix?: string;
   diff: string;
-  inlineComments?: InlineReviewComment[];
   listPullRequestFiles: (
     repo: string,
     prNumber: number,
@@ -102,8 +103,8 @@ export async function postReviewOutput(params: {
   const context: PublishReviewContext = {
     repo: params.repo,
     prNumber: params.prNumber,
-    body: params.body,
-    inlineComments: params.inlineComments,
+    findings: params.findings,
+    summaryPrefix: params.summaryPrefix,
   };
 
   const adapter: ReviewPublisherAdapter = {
@@ -115,7 +116,7 @@ export async function postReviewOutput(params: {
       { repo, prNumber },
       comment: InlineReviewComment,
     ) => {
-      const line = resolveClosestCommentableLine(
+      const line = resolveExactCommentableLine(
         lineIndex,
         comment.path,
         comment.line,
