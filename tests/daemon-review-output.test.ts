@@ -245,7 +245,7 @@ describe("review prompt contracts", () => {
       "Always include the `findings` key. If there are no actionable issues, return exactly {\"findings\":[]}.",
     );
     expect(prompt).toContain(
-      "Each finding `body` must be markdown text with these sections in order: `🧠 ReviewFlux Review`, `### Summary`, `### Findings (ordered by severity)`, `### Verification Notes`.",
+      "Each finding `body` must be markdown text with these sections in order: `### Summary`, `### Findings (ordered by severity)`, `### Verification Notes`.",
     );
     expect(prompt).toContain(
       "Do not output any text outside the single JSON object. Markdown is allowed only inside `body` string values.",
@@ -270,7 +270,7 @@ describe("review prompt contracts", () => {
     expect(prompt).toContain("Return one JSON object only. Do not return markdown or prose outside JSON.");
     expect(prompt).toContain("- If exact location is unclear, set path to \"\" and line to \"\".");
     expect(prompt).toContain(
-      "- Each finding body must include `🧠 ReviewFlux Review` + `### Summary` + `### Findings (ordered by severity)` + `### Verification Notes` in this order.",
+      "- Each finding body must include `### Summary` + `### Findings (ordered by severity)` + `### Verification Notes` in this order.",
     );
     expect(prompt).toContain(
       "- In `### Findings (ordered by severity)`, include `- Severity` and at least one concrete `- Detail` bullet.",

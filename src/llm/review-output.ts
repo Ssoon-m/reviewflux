@@ -82,7 +82,8 @@ function parseStructuredReviewOutput(raw: string): ReviewFinding[] | null {
     parsedObject,
     "findings",
   );
-  const hasFindingsArray = hasFindingsField && Array.isArray(parsedObject.findings);
+  const hasFindingsArray =
+    hasFindingsField && Array.isArray(parsedObject.findings);
   if (!hasFindingsArray) return null;
 
   const commentsRaw = normalizeStructuredReviewComments(parsedObject);

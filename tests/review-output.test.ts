@@ -36,6 +36,48 @@ describe("review output normalization", () => {
     ]);
   });
 
+  it("keeps valid findings when mixed with invalid entries", () => {
+    const result = resolveReviewOutputFromModel(
+      '{"findings":[{"path":"src/a.ts","line":12,"body":"Anchored finding","severity":"High"},{"path":"src/b.ts","line":20,"body":"   ","severity":"Low"}]}',
+    );
+
+    expect(result.findings).toEqual([
+      {
+        path: "src/a.ts",
+        line: 12,
+        body: "Anchored finding",
+      },
+    ]);
+  });
+
+  it("normalizes malformed anchors to general findings under the current contract", () => {
+    const result = resolveReviewOutputFromModel(
+      '{"findings":[{"path":"src/a.ts","line":"oops","body":"Potential issue without exact anchor","severity":"Medium"}]}',
+    );
+
+    expect(result.findings).toEqual([
+      {
+        path: "",
+        line: "",
+        body: "Potential issue without exact anchor",
+      },
+    ]);
+  });
+
+  it("accepts numeric string lines as valid anchors", () => {
+    const result = resolveReviewOutputFromModel(
+      '{"findings":[{"path":"src/a.ts","line":"12","body":"String line anchor","severity":"Medium"}]}',
+    );
+
+    expect(result.findings).toEqual([
+      {
+        path: "src/a.ts",
+        line: 12,
+        body: "String line anchor",
+      },
+    ]);
+  });
+
   it("returns a fallback finding for invalid model output", () => {
     const result = resolveReviewOutputFromModel("not valid json");
 
