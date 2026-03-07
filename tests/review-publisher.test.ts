@@ -37,16 +37,14 @@ describe("review publisher", () => {
     expect(adapter.listChangedPaths).not.toHaveBeenCalled();
     expect(adapter.postInlineComment).not.toHaveBeenCalled();
     expect(postSummaryComment).toHaveBeenCalledTimes(1);
+    expect(postSummaryComment.mock.calls[0]?.[1].startsWith("🧠 ReviewFlux Review\n\n")).toBe(true);
     expect(postSummaryComment.mock.calls[0]?.[1]).toContain(
       "Great news - no actionable issues were found in this PR.",
     );
   });
 
-  it("adds summary prefix to no-issue summaries", async () => {
-    const context = {
-      ...makeContext(),
-      summaryPrefix: "Requested by @ssoon-m: https://example.com/comment/2",
-    } satisfies PublishReviewContext;
+  it("keeps no-issue summaries normalized without extra prefix metadata", async () => {
+    const context = makeContext();
     const postSummaryComment = vi
       .fn<ReviewPublisherAdapter["postSummaryComment"]>()
       .mockResolvedValue(undefined);
@@ -58,9 +56,7 @@ describe("review publisher", () => {
 
     await publishReviewWithInlineComments({ context, adapter });
 
-    expect(postSummaryComment.mock.calls[0]?.[1]).toContain(
-      "Requested by @ssoon-m: https://example.com/comment/2",
-    );
+    expect(postSummaryComment.mock.calls[0]?.[1].startsWith("🧠 ReviewFlux Review\n\n")).toBe(true);
     expect(postSummaryComment.mock.calls[0]?.[1]).toContain(
       "Great news - no actionable issues were found in this PR.",
     );
@@ -90,6 +86,7 @@ describe("review publisher", () => {
       postedInlineCount: 0,
       postedSummaryFallback: true,
     });
+    expect(postSummaryComment.mock.calls[0]?.[1].startsWith("🧠 ReviewFlux Review\n\n")).toBe(true);
     expect(postSummaryComment.mock.calls[0]?.[1]).toContain(
       "General finding without an anchor",
     );
@@ -133,9 +130,11 @@ describe("review publisher", () => {
     expect(postInlineComment).toHaveBeenCalledWith(context, {
       path: "src/a.ts",
       line: 12,
-      body: "- Severity: [High]\n- Detail: null guard missing",
+      body:
+        "🧠 ReviewFlux Review\n\n- Severity: [High]\n- Detail: null guard missing",
     } satisfies InlineReviewComment);
     expect(postSummaryComment).toHaveBeenCalledTimes(1);
+    expect(postSummaryComment.mock.calls[0]?.[1].startsWith("🧠 ReviewFlux Review\n\n")).toBe(true);
     expect(postSummaryComment.mock.calls[0]?.[1]).toContain("noisy logging");
     expect(postSummaryComment.mock.calls[0]?.[1]).not.toContain(
       "src/ignored.ts:7",
@@ -176,6 +175,7 @@ describe("review publisher", () => {
       postedSummaryFallback: true,
     });
     expect(postInlineComment).toHaveBeenCalledTimes(1);
+    expect(postSummaryComment.mock.calls[0]?.[1].startsWith("🧠 ReviewFlux Review\n\n")).toBe(true);
     expect(postSummaryComment).toHaveBeenCalledTimes(1);
     expect(postSummaryComment.mock.calls[0]?.[1]).toContain(
       "General finding that must not disappear",
@@ -183,17 +183,14 @@ describe("review publisher", () => {
     expect(postSummaryComment.mock.calls[0]?.[1]).not.toContain("src/a.ts:12");
   });
 
-  it("can also post compact summary after inline comments when enabled", async () => {
-    const context = {
-      ...makeContext([
-        {
-          path: "src/a.ts",
-          line: 12,
-          body: "- Severity: [High]\n- Detail: null guard missing",
-        },
-      ]),
-      summaryPrefix: "Requested by @ssoon-m: https://example.com/comment/1",
-    } satisfies PublishReviewContext;
+  it("can also post the original body after inline comments when enabled", async () => {
+    const context = makeContext([
+      {
+        path: "src/a.ts",
+        line: 12,
+        body: "- Severity: [High]\n- Detail: null guard missing",
+      },
+    ]);
 
     const postSummaryComment = vi
       .fn<ReviewPublisherAdapter["postSummaryComment"]>()
@@ -219,10 +216,11 @@ describe("review publisher", () => {
       postedSummaryFallback: false,
     });
     expect(postSummaryComment).toHaveBeenCalledTimes(1);
+    expect(postSummaryComment.mock.calls[0]?.[1].startsWith("🧠 ReviewFlux Review\n\n")).toBe(true);
     expect(postSummaryComment.mock.calls[0]?.[1]).toContain(
-      "Requested by @ssoon-m: https://example.com/comment/1",
+      "- Detail: null guard missing",
     );
-    expect(postSummaryComment.mock.calls[0]?.[1]).toContain("src/a.ts:12");
+    expect(postSummaryComment.mock.calls[0]?.[1]).not.toContain("src/a.ts:12");
   });
 
   it("falls back to summary when inline comments all fail", async () => {
@@ -254,6 +252,7 @@ describe("review publisher", () => {
       postedSummaryFallback: true,
     });
     expect(postInlineComment).toHaveBeenCalledTimes(1);
+    expect(postSummaryComment.mock.calls[0]?.[1].startsWith("🧠 ReviewFlux Review\n\n")).toBe(true);
     expect(postSummaryComment.mock.calls[0]?.[1]).toContain(
       "missing type guard",
     );
@@ -290,11 +289,67 @@ describe("review publisher", () => {
       postedInlineCount: 0,
       postedSummaryFallback: true,
     });
+    expect(postSummaryComment.mock.calls[0]?.[1].startsWith("🧠 ReviewFlux Review\n\n")).toBe(true);
     expect(postSummaryComment.mock.calls[0]?.[1]).toContain(
       "General finding that should survive",
     );
     expect(postSummaryComment.mock.calls[0]?.[1]).not.toContain(
       "src/not-changed.ts:10",
+    );
+  });
+
+  it("posts a detailed top-level review body in summary-only mode", async () => {
+    const detailedBody = [
+      "🧠 ReviewFlux Review",
+      "",
+      "### Summary",
+      "The runtime guard can reject a valid owner trigger.",
+      "",
+      "### Findings (ordered by severity)",
+      "",
+      "- Severity: [High]",
+      "- Detail: owner association is not accepted in this branch.",
+      "",
+      "### Verification Notes",
+      "- Verified: inspected guard branch",
+      "- Not Verified: live GitHub behavior",
+    ].join("\n");
+    const context = {
+      ...makeContext([
+        {
+          path: "src/gateway/http-server.ts",
+          line: 474,
+          body: detailedBody,
+        },
+      ]),
+      preferTopLevelCommentOnly: true,
+    } satisfies PublishReviewContext;
+
+    const postSummaryComment = vi
+      .fn<ReviewPublisherAdapter["postSummaryComment"]>()
+      .mockResolvedValue(undefined);
+    const adapter: ReviewPublisherAdapter = {
+      listChangedPaths: vi.fn().mockResolvedValue(["src/gateway/http-server.ts"]),
+      postInlineComment: vi.fn().mockResolvedValue(undefined),
+      postSummaryComment,
+    };
+
+    const result = await publishReviewWithInlineComments({ context, adapter });
+
+    expect(result).toEqual({
+      attemptedInlineCount: 0,
+      postedInlineCount: 0,
+      postedSummaryFallback: true,
+    });
+    expect(adapter.listChangedPaths).not.toHaveBeenCalled();
+    expect(adapter.postInlineComment).not.toHaveBeenCalled();
+    expect(postSummaryComment).toHaveBeenCalledTimes(1);
+    expect((postSummaryComment.mock.calls[0]?.[1].match(/🧠 ReviewFlux Review/g) ?? []).length).toBe(1);
+    expect(postSummaryComment.mock.calls[0]?.[1]).toContain(
+      "The runtime guard can reject a valid owner trigger.",
+    );
+    expect(postSummaryComment.mock.calls[0]?.[1]).not.toContain(
+      "src/gateway/http-server.ts:474",
     );
   });
 
@@ -328,5 +383,46 @@ describe("review publisher", () => {
     await publishReviewWithInlineComments({ context, adapter });
 
     expect(postSummaryComment.mock.calls[0]?.[1]).toBe(directBody);
+  });
+
+  it("joins multiple titled top-level bodies with a single title and separators", async () => {
+    const context = makeContext([
+      {
+        path: "",
+        line: "",
+        body: [
+          "🧠 ReviewFlux Review",
+          "",
+          "### Summary",
+          "First body",
+        ].join("\n"),
+      },
+      {
+        path: "",
+        line: "",
+        body: [
+          "🧠 ReviewFlux Review",
+          "",
+          "### Summary",
+          "Second body",
+        ].join("\n"),
+      },
+    ]);
+    const postSummaryComment = vi
+      .fn<ReviewPublisherAdapter["postSummaryComment"]>()
+      .mockResolvedValue(undefined);
+    const adapter: ReviewPublisherAdapter = {
+      listChangedPaths: vi.fn().mockResolvedValue([]),
+      postInlineComment: vi.fn().mockResolvedValue(undefined),
+      postSummaryComment,
+    };
+
+    await publishReviewWithInlineComments({ context, adapter });
+
+    const body = postSummaryComment.mock.calls[0]?.[1] ?? "";
+    expect((body.match(/🧠 ReviewFlux Review/g) ?? []).length).toBe(1);
+    expect(body).toContain("First body");
+    expect(body).toContain("Second body");
+    expect(body).toContain("\n\n---\n\n");
   });
 });

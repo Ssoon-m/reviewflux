@@ -767,21 +767,13 @@ async function triggerReview(params: {
     });
 
     const resolvedReview = resolveReviewOutputFromModel(review.raw);
-    let summaryPrefix: string | undefined;
-
-    if (params.reason === "manual_force" && params.triggerComment?.url) {
-      const triggerAuthor = params.triggerComment.author?.trim();
-      summaryPrefix = triggerAuthor
-        ? `Requested by @${triggerAuthor}: ${params.triggerComment.url}`
-        : `Requested via trigger comment: ${params.triggerComment.url}`;
-    }
 
     await postReviewOutput({
       repo: params.repo,
       prNumber: params.prNumber,
       prHeadSha: pr.head.sha,
       findings: resolvedReview.findings,
-      summaryPrefix,
+      preferTopLevelCommentOnly: params.reason === "manual_force",
       diff: review.diff,
       listPullRequestFiles,
       postReviewComment,

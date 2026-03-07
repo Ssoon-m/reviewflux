@@ -80,7 +80,7 @@ export async function postReviewOutput(params: {
   prNumber: number;
   prHeadSha: string;
   findings?: ReviewFinding[];
-  summaryPrefix?: string;
+  preferTopLevelCommentOnly?: boolean;
   diff: string;
   listPullRequestFiles: (
     repo: string,
@@ -104,7 +104,7 @@ export async function postReviewOutput(params: {
     repo: params.repo,
     prNumber: params.prNumber,
     findings: params.findings,
-    summaryPrefix: params.summaryPrefix,
+    preferTopLevelCommentOnly: params.preferTopLevelCommentOnly,
   };
 
   const adapter: ReviewPublisherAdapter = {
