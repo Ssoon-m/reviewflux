@@ -704,10 +704,6 @@ async function triggerReview(params: {
   prNumber: number;
   reason: ReviewTriggerReason;
   state?: DaemonState;
-  triggerComment?: {
-    url?: string;
-    author?: string;
-  };
 }): Promise<void> {
   const basePolicyGuidance = loadBasePolicyGuidance();
   const globalAgentsGuidance = loadGlobalAgentsGuidance();
@@ -910,10 +906,6 @@ async function pollProject(params: {
       prNumber: issue.number,
       reason: "manual_force",
       state,
-      triggerComment: {
-        url: comment.html_url,
-        author: comment.user?.login,
-      },
     });
     trackSeenCommentId(projectState, seenId);
   }
@@ -936,10 +928,6 @@ async function pollProject(params: {
       prNumber,
       reason: "manual_force",
       state,
-      triggerComment: {
-        url: comment.html_url,
-        author: comment.user?.login,
-      },
     });
     trackSeenCommentId(projectState, seenId);
   }
