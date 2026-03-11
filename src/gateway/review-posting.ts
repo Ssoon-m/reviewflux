@@ -86,11 +86,11 @@ export async function postReviewOutput(params: {
     repo: string,
     prNumber: number,
   ) => Promise<PullRequestFile[]>;
-  postReviewComment: (
-    repo: string,
-    prNumber: number,
-    body: string,
-  ) => Promise<void>;
+  postSummaryComment: (args: {
+    repo: string;
+    prNumber: number;
+    body: string;
+  }) => Promise<void>;
   postInlineReviewComment: (args: {
     repo: string;
     prNumber: number;
@@ -139,7 +139,7 @@ export async function postReviewOutput(params: {
       });
     },
     postSummaryComment: async ({ repo, prNumber }, body) =>
-      params.postReviewComment(repo, prNumber, body),
+      params.postSummaryComment({ repo, prNumber, body }),
   };
 
   await publishReviewWithInlineComments({

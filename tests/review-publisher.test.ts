@@ -92,6 +92,39 @@ describe("review publisher", () => {
     );
   });
 
+  it("posts one top-level comment per general finding", async () => {
+    const context = makeContext([
+      {
+        path: "",
+        line: "",
+        body: "First general finding",
+      },
+      {
+        path: "",
+        line: "",
+        body: "Second general finding",
+      },
+    ]);
+    const postSummaryComment = vi
+      .fn<ReviewPublisherAdapter["postSummaryComment"]>()
+      .mockResolvedValue(undefined);
+    const adapter: ReviewPublisherAdapter = {
+      listChangedPaths: vi.fn().mockResolvedValue([]),
+      postInlineComment: vi.fn().mockResolvedValue(undefined),
+      postSummaryComment,
+    };
+
+    await publishReviewWithInlineComments({ context, adapter });
+
+    expect(postSummaryComment).toHaveBeenCalledTimes(2);
+    expect(postSummaryComment.mock.calls[0]?.[1]).toContain(
+      "First general finding",
+    );
+    expect(postSummaryComment.mock.calls[1]?.[1]).toContain(
+      "Second general finding",
+    );
+  });
+
   it("posts leftover summary when some anchored findings cannot be posted", async () => {
     const findings: ReviewFinding[] = [
       {
@@ -385,7 +418,7 @@ describe("review publisher", () => {
     expect(postSummaryComment.mock.calls[0]?.[1]).toBe(directBody);
   });
 
-  it("joins multiple titled top-level bodies with a single title and separators", async () => {
+  it("posts multiple titled top-level bodies as separate comments", async () => {
     const context = makeContext([
       {
         path: "",
@@ -419,10 +452,12 @@ describe("review publisher", () => {
 
     await publishReviewWithInlineComments({ context, adapter });
 
-    const body = postSummaryComment.mock.calls[0]?.[1] ?? "";
-    expect((body.match(/🧠 ReviewFlux Review/g) ?? []).length).toBe(1);
-    expect(body).toContain("First body");
-    expect(body).toContain("Second body");
-    expect(body).toContain("\n\n---\n\n");
+    expect(postSummaryComment).toHaveBeenCalledTimes(2);
+    expect((postSummaryComment.mock.calls[0]?.[1].match(/🧠 ReviewFlux Review/g) ?? []).length).toBe(1);
+    expect(postSummaryComment.mock.calls[0]?.[1]).toContain("First body");
+    expect(postSummaryComment.mock.calls[0]?.[1]).not.toContain("Second body");
+    expect((postSummaryComment.mock.calls[1]?.[1].match(/🧠 ReviewFlux Review/g) ?? []).length).toBe(1);
+    expect(postSummaryComment.mock.calls[1]?.[1]).toContain("Second body");
+    expect(postSummaryComment.mock.calls[1]?.[1]).not.toContain("First body");
   });
 });

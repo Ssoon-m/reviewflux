@@ -10,7 +10,7 @@ function makeParams(overrides: Partial<Parameters<typeof postReviewOutput>[0]> =
     preferTopLevelCommentOnly: false,
     diff: "",
     listPullRequestFiles: vi.fn().mockResolvedValue([]),
-    postReviewComment: vi.fn().mockResolvedValue(undefined),
+    postSummaryComment: vi.fn().mockResolvedValue(undefined),
     postInlineReviewComment: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   };
@@ -21,7 +21,7 @@ describe("review posting", () => {
     const listPullRequestFiles = vi
       .fn()
       .mockResolvedValue([{ filename: "src/a.ts" }]);
-    const postReviewComment = vi.fn().mockResolvedValue(undefined);
+    const postSummaryComment = vi.fn().mockResolvedValue(undefined);
     const postInlineReviewComment = vi.fn().mockResolvedValue(undefined);
     const params = makeParams({
       findings: [
@@ -41,7 +41,7 @@ describe("review posting", () => {
         " line three",
       ].join("\n"),
       listPullRequestFiles,
-      postReviewComment,
+      postSummaryComment,
       postInlineReviewComment,
     });
 
@@ -59,14 +59,14 @@ describe("review posting", () => {
         body: "🧠 ReviewFlux Review\n\n- Detail: exact line comment",
       },
     });
-    expect(postReviewComment).not.toHaveBeenCalled();
+    expect(postSummaryComment).not.toHaveBeenCalled();
   });
 
   it("falls back to top-level comment when the requested line is absent from the diff", async () => {
     const listPullRequestFiles = vi
       .fn()
       .mockResolvedValue([{ filename: "src/a.ts" }]);
-    const postReviewComment = vi.fn().mockResolvedValue(undefined);
+    const postSummaryComment = vi.fn().mockResolvedValue(undefined);
     const postInlineReviewComment = vi.fn().mockResolvedValue(undefined);
     const params = makeParams({
       findings: [
@@ -86,27 +86,29 @@ describe("review posting", () => {
         " line three",
       ].join("\n"),
       listPullRequestFiles,
-      postReviewComment,
+      postSummaryComment,
       postInlineReviewComment,
     });
 
     await postReviewOutput(params);
 
     expect(postInlineReviewComment).not.toHaveBeenCalled();
-    expect(postReviewComment).toHaveBeenCalledTimes(1);
-    expect(postReviewComment).toHaveBeenCalledWith(
-      "ssoon-m/reviewflux",
-      42,
-      expect.stringContaining("- Detail: cannot resolve exact diff line"),
+    expect(postSummaryComment).toHaveBeenCalledTimes(1);
+    expect(postSummaryComment).toHaveBeenCalledWith({
+      repo: "ssoon-m/reviewflux",
+      prNumber: 42,
+      body: expect.stringContaining("- Detail: cannot resolve exact diff line"),
+    });
+    expect(postSummaryComment.mock.calls[0]?.[0].body).not.toContain(
+      "src/a.ts:99",
     );
-    expect(postReviewComment.mock.calls[0]?.[2]).not.toContain("src/a.ts:99");
   });
 
   it("resolves exact commentable lines across multiple hunks", async () => {
     const listPullRequestFiles = vi
       .fn()
       .mockResolvedValue([{ filename: "src/a.ts" }]);
-    const postReviewComment = vi.fn().mockResolvedValue(undefined);
+    const postSummaryComment = vi.fn().mockResolvedValue(undefined);
     const postInlineReviewComment = vi.fn().mockResolvedValue(undefined);
     const params = makeParams({
       findings: [
@@ -132,7 +134,7 @@ describe("review posting", () => {
         " thirteen",
       ].join("\n"),
       listPullRequestFiles,
-      postReviewComment,
+      postSummaryComment,
       postInlineReviewComment,
     });
 
@@ -149,14 +151,14 @@ describe("review posting", () => {
       line: 12,
       body: "🧠 ReviewFlux Review\n\n- Detail: second hunk exact line",
     });
-    expect(postReviewComment).not.toHaveBeenCalled();
+    expect(postSummaryComment).not.toHaveBeenCalled();
   });
 
   it("uses only top-level comments when preferTopLevelCommentOnly is enabled", async () => {
     const listPullRequestFiles = vi
       .fn()
       .mockResolvedValue([{ filename: "src/a.ts" }]);
-    const postReviewComment = vi.fn().mockResolvedValue(undefined);
+    const postSummaryComment = vi.fn().mockResolvedValue(undefined);
     const postInlineReviewComment = vi.fn().mockResolvedValue(undefined);
     const params = makeParams({
       findings: [
@@ -176,7 +178,7 @@ describe("review posting", () => {
         "+line two",
       ].join("\n"),
       listPullRequestFiles,
-      postReviewComment,
+      postSummaryComment,
       postInlineReviewComment,
     });
 
@@ -184,8 +186,8 @@ describe("review posting", () => {
 
     expect(listPullRequestFiles).not.toHaveBeenCalled();
     expect(postInlineReviewComment).not.toHaveBeenCalled();
-    expect(postReviewComment).toHaveBeenCalledTimes(1);
-    expect(postReviewComment.mock.calls[0]?.[2]).toBe(
+    expect(postSummaryComment).toHaveBeenCalledTimes(1);
+    expect(postSummaryComment.mock.calls[0]?.[0].body).toBe(
       "🧠 ReviewFlux Review\n\n### Summary\nTop-level only review",
     );
   });

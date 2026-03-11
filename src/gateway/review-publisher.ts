@@ -71,23 +71,30 @@ function buildPostedCommentBody(body: string): string {
   return parts.join("\n").trim();
 }
 
-function buildTopLevelCommentBody(findings: ReviewFinding[]): string {
+function buildTopLevelCommentBodies(findings: ReviewFinding[]): string[] {
   if (findings.length === 0) {
-    return buildPostedCommentBody(buildNoIssueBody());
+    return [buildPostedCommentBody(buildNoIssueBody())];
   }
 
   const blocks = findings
     .map((finding) => stripLeadingReviewTitle(finding.body))
     .filter((body) => body.length > 0);
   if (blocks.length === 0) {
-    return buildPostedCommentBody(buildNoIssueBody());
+    return [buildPostedCommentBody(buildNoIssueBody())];
   }
 
-  if (blocks.length === 1) {
-    return buildPostedCommentBody(blocks[0]);
-  }
+  return blocks.map((block) => buildPostedCommentBody(block));
+}
 
-  return buildPostedCommentBody(blocks.join("\n\n---\n\n"));
+async function postTopLevelComments(params: {
+  context: PublishReviewContext;
+  adapter: ReviewPublisherAdapter;
+  findings: ReviewFinding[];
+}): Promise<void> {
+  const bodies = buildTopLevelCommentBodies(params.findings);
+  for (const body of bodies) {
+    await params.adapter.postSummaryComment(params.context, body);
+  }
 }
 
 export async function publishReviewWithInlineComments(params: {
@@ -101,10 +108,7 @@ export async function publishReviewWithInlineComments(params: {
   const findings = context.findings ?? [];
 
   if (context.preferTopLevelCommentOnly) {
-    await adapter.postSummaryComment(
-      context,
-      buildTopLevelCommentBody(findings),
-    );
+    await postTopLevelComments({ context, adapter, findings });
     return {
       attemptedInlineCount: 0,
       postedInlineCount: 0,
@@ -118,10 +122,7 @@ export async function publishReviewWithInlineComments(params: {
   );
 
   if (parsedInline.length === 0) {
-    await adapter.postSummaryComment(
-      context,
-      buildTopLevelCommentBody(findings),
-    );
+    await postTopLevelComments({ context, adapter, findings });
     return {
       attemptedInlineCount: 0,
       postedInlineCount: 0,
@@ -142,10 +143,11 @@ export async function publishReviewWithInlineComments(params: {
   ];
 
   if (inline.length === 0) {
-    await adapter.postSummaryComment(
+    await postTopLevelComments({
       context,
-      buildTopLevelCommentBody(remainingFindings),
-    );
+      adapter,
+      findings: remainingFindings,
+    });
     return {
       attemptedInlineCount: 0,
       postedInlineCount: 0,
@@ -170,10 +172,11 @@ export async function publishReviewWithInlineComments(params: {
   }
 
   if (postedInlineCount === 0) {
-    await adapter.postSummaryComment(
+    await postTopLevelComments({
       context,
-      buildTopLevelCommentBody(remainingFindings),
-    );
+      adapter,
+      findings: remainingFindings,
+    });
     return {
       attemptedInlineCount: inline.length,
       postedInlineCount,
@@ -182,10 +185,11 @@ export async function publishReviewWithInlineComments(params: {
   }
 
   if (remainingFindings.length > 0) {
-    await adapter.postSummaryComment(
+    await postTopLevelComments({
       context,
-      buildTopLevelCommentBody(remainingFindings),
-    );
+      adapter,
+      findings: remainingFindings,
+    });
     return {
       attemptedInlineCount: inline.length,
       postedInlineCount,
@@ -194,8 +198,11 @@ export async function publishReviewWithInlineComments(params: {
   }
 
   if (params.postSummaryWhenInlinePosted) {
-    const inlineSummaryBody = buildTopLevelCommentBody(postedInline);
-    await adapter.postSummaryComment(context, inlineSummaryBody);
+    await postTopLevelComments({
+      context,
+      adapter,
+      findings: postedInline,
+    });
   }
   return {
     attemptedInlineCount: inline.length,
