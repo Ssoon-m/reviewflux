@@ -2,11 +2,16 @@ import { spawn, spawnSync } from "node:child_process";
 import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { Command } from "commander";
 import {
   getModel,
   getModels,
 } from "@mariozechner/pi-ai";
 import { getOAuthProvider, getOAuthProviders } from "@mariozechner/pi-ai/oauth";
+import {
+  resolveCommandBuilderDependencies,
+  type CommandBuilderDependencies,
+} from "../../cli/command-builder.js";
 import {
   promptPassword,
   promptSelect,
@@ -50,6 +55,14 @@ type GlobalAgentsTemplateResolution = {
   content: string;
   source: string;
 };
+
+type SetupCommandHandlers = {
+  runSetup: (options: SetupOptions) => Promise<void>;
+};
+
+export type SetupCommandDependencies = CommandBuilderDependencies<
+  SetupCommandHandlers
+>;
 
 function globalAgentsPath(home: string): string {
   return join(home, GLOBAL_AGENTS_FILE);
@@ -114,10 +127,6 @@ function ensureGlobalAgentsTemplate(home: string): {
   writeFileSync(path, template.content, { encoding: "utf8", mode: 0o600 });
   chmodSync(path, 0o600);
   return { created: true, source: template.source };
-}
-
-function parseSetupOptions(args: string[]): SetupOptions {
-  return { advanced: args.includes("--advanced") };
 }
 
 function assertNonEmpty(value: string, field: string): string {
@@ -670,8 +679,32 @@ async function runSetup(options: SetupOptions): Promise<void> {
   releaseInteractiveInput();
 }
 
-export async function runSetupCommand(args: string[]): Promise<void> {
-  await runSetup(parseSetupOptions(args));
+const defaultSetupCommandHandlers: SetupCommandHandlers = {
+  runSetup,
+};
+
+function normalizeSetupOptions(options: Partial<SetupOptions> = {}): SetupOptions {
+  return { advanced: options.advanced === true };
+}
+
+export function buildSetupCommand(
+  program: Command,
+  dependencies: SetupCommandDependencies = {},
+): Command {
+  const handlers = resolveCommandBuilderDependencies(
+    defaultSetupCommandHandlers,
+    dependencies,
+  );
+
+  program
+    .command("setup")
+    .description("configure ReviewFlux auth and local defaults")
+    .option("--advanced", "show advanced setup prompts")
+    .action(async (options: Partial<SetupOptions>) => {
+      await handlers.runSetup(normalizeSetupOptions(options));
+    });
+
+  return program;
 }
 
 

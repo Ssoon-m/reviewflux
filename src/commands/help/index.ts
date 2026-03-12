@@ -1,16 +1,14 @@
-export function printHelp(): void {
-  console.log(`reviewflux commands:
-  reviewflux setup [--advanced]
-  reviewflux project add
-  reviewflux project list
-  reviewflux project remove
-  reviewflux project set-model
-  reviewflux daemon start
-  reviewflux daemon stop
-  reviewflux daemon status
-  reviewflux daemon install`);
-}
+import { Command } from "commander";
 
-export async function runHelpCommand(): Promise<void> {
-  printHelp();
+export const PROGRAM_NAME = "reviewflux";
+export const PROGRAM_DESCRIPTION = "CLI-first event-driven review runtime";
+
+export function configureHelp(
+  program: Command,
+): Command {
+  program.helpCommand("help [command]", "display help for command");
+  program.showHelpAfterError();
+  program.showSuggestionAfterError();
+
+  return program;
 }

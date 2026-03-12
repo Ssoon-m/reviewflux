@@ -1,86 +1,32 @@
 #!/usr/bin/env node
-import { printHelp, runHelpCommand } from "../commands/help/index.js";
-import { runSetupCommand } from "../commands/setup/index.js";
-import {
-  runDaemonInstallCommand,
-  runDaemonStartCommand,
-  runDaemonStatusCommand,
-  runDaemonStopCommand,
-} from "../commands/daemon/index.js";
-import {
-  runProjectAddCommand,
-  runProjectListCommand,
-  runProjectRemoveCommand,
-  runProjectSetModelCommand,
-} from "../commands/project/index.js";
+import { CommanderError } from "commander";
+import { buildProgram } from "./program.js";
+import { normalizeRootArgs } from "./root-args.js";
+
+function applyExitOverride(command: import("commander").Command): void {
+  command.exitOverride();
+  for (const subcommand of command.commands) {
+    applyExitOverride(subcommand);
+  }
+}
 
 async function main() {
-  const args = process.argv.slice(2);
-  const [cmd, subcmd] = args;
+  const program = buildProgram();
+  applyExitOverride(program);
+  const groupCommandNames = new Set(
+    program.commands
+      .filter((command) => command.commands.length > 0)
+      .map((command) => command.name()),
+  );
 
-  if (!cmd || cmd === "--help" || cmd === "-h") {
-    await runHelpCommand();
-    return;
-  }
-
-  if (cmd === "help") {
-    await runHelpCommand();
-    return;
-  }
-
-  if (cmd === "setup") {
-    await runSetupCommand(args.slice(1));
-    process.exit(0);
-    return;
-  }
-
-  if (cmd === "daemon" && subcmd === "start") {
-    await runDaemonStartCommand();
-    return;
-  }
-
-  if (cmd === "daemon" && subcmd === "stop") {
-    await runDaemonStopCommand();
-    return;
-  }
-
-  if (cmd === "daemon" && subcmd === "status") {
-    await runDaemonStatusCommand();
-    return;
-  }
-
-  if (cmd === "daemon" && subcmd === "install") {
-    await runDaemonInstallCommand();
-    return;
-  }
-
-  if (cmd === "project" && subcmd === "add") {
-    await runProjectAddCommand();
-    process.exit(0);
-    return;
-  }
-
-  if (cmd === "project" && subcmd === "list") {
-    await runProjectListCommand();
-    return;
-  }
-
-  if (cmd === "project" && subcmd === "remove") {
-    await runProjectRemoveCommand();
-    return;
-  }
-
-  if (cmd === "project" && subcmd === "set-model") {
-    await runProjectSetModelCommand();
-    process.exit(0);
-    return;
-  }
-
-  printHelp();
-  process.exitCode = 1;
+  await program.parseAsync(normalizeRootArgs(process.argv, groupCommandNames));
 }
 
 main().catch((error) => {
+  if (error instanceof CommanderError) {
+    process.exit(error.exitCode);
+  }
+
   console.error("[reviewflux] fatal", error);
   process.exit(1);
 });
