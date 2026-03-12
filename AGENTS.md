@@ -48,6 +48,11 @@ Each directory should represent a stable domain boundary.
 - **Responsibility:** runtime environment configuration schema and parsing.
 - **Must contain:** env schema, validation, config shaping for runtime.
 
+### `src/project/`
+- **Responsibility:** project-scoped configuration helpers reused across commands/runtime.
+- **Must contain:** repository input normalization, project review-mode parsing, and other project-specific shaping logic.
+- **Must NOT contain:** interactive CLI prompts, LLM routing, or transport-specific gateway behavior.
+
 ### `src/lib/`
 - **Responsibility:** domain-agnostic reusable modules with high internal cohesion.
 - **Rule:** `lib` is not a dump folder. Group by cohesive capability (e.g., `lib/async`, `lib/text`, `lib/net`, `lib/validate`).
