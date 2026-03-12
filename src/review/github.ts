@@ -8,7 +8,7 @@ import {
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { buildProjectContextText, pickContextFilePaths, resolveContextPatterns, type ContextFile } from "../llm/project-context.js";
-import { normalizeRepoKey } from "../llm/model-routing.js";
+import { normalizeRepoKey } from "../project/input.js";
 import { type InlineReviewComment } from "../gateway/review-publisher.js";
 import type {
   IssueComment,

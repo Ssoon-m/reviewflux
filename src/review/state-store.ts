@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import { normalizeRepoKey } from "../llm/model-routing.js";
+import { normalizeRepoKey } from "../project/input.js";
 
 export type ProjectReviewState = {
   initialized: boolean;

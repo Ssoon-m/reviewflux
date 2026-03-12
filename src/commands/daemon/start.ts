@@ -1,6 +1,6 @@
 import { setTimeout as wait } from "node:timers/promises";
 import { loadConfig, type ReviewFluxConfig } from "../../cli/config.js";
-import { normalizeRepoKey } from "../../llm/model-routing.js";
+import { normalizeRepoKey } from "../../project/input.js";
 import {
   assertGhReady,
   fetchIssueInfo,
