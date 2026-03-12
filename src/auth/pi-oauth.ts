@@ -1,4 +1,8 @@
-import { getOAuthProvider, type OAuthCredentials, type OAuthLoginCallbacks } from "@mariozechner/pi-ai/oauth";
+import {
+  getOAuthProvider,
+  type OAuthCredentials,
+  type OAuthLoginCallbacks,
+} from "@mariozechner/pi-ai/oauth";
 import type { LlmProvider, OAuthConfig } from "../cli/config.js";
 
 /** Resolve to pi-ai OAuth provider id; only providers registered in pi-ai are valid. */

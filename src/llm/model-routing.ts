@@ -1,3 +1,5 @@
+import { normalizeRepoKey } from "../project/input.js";
+
 export type LlmProviderId = "openai-codex" | "openai" | "google" | "anthropic";
 
 export type TaskKey = "review" | "autofix" | "summary" | "default";
@@ -25,10 +27,6 @@ export type ResolveModelInput = {
   repo?: string;
   aliasOverride?: string;
 };
-
-export function normalizeRepoKey(repo: string): string {
-  return repo.trim().toLowerCase();
-}
 
 export class ModelCatalog {
   constructor(private readonly aliases: ModelAliasMap) {}

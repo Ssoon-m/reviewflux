@@ -2,6 +2,7 @@ import {
   publishReviewWithInlineComments,
   type InlineReviewComment,
   type PublishReviewContext,
+  type ReviewFinding,
   type ReviewPublisherAdapter,
 } from "./review-publisher.js";
 
@@ -61,7 +62,7 @@ function parseCommentableRightSideLinesFromDiff(diff: string): DiffLineIndex {
   return index;
 }
 
-function resolveClosestCommentableLine(
+function resolveExactCommentableLine(
   lineIndex: DiffLineIndex,
   path: string,
   requestedLine: number,
@@ -78,18 +79,19 @@ export async function postReviewOutput(params: {
   repo: string;
   prNumber: number;
   prHeadSha: string;
-  body: string;
+  findings?: ReviewFinding[];
+  preferTopLevelCommentOnly?: boolean;
+  postSummaryWhenInlinePosted?: boolean;
   diff: string;
-  inlineComments?: InlineReviewComment[];
   listPullRequestFiles: (
     repo: string,
     prNumber: number,
   ) => Promise<PullRequestFile[]>;
-  postReviewComment: (
-    repo: string,
-    prNumber: number,
-    body: string,
-  ) => Promise<void>;
+  postSummaryComment: (args: {
+    repo: string;
+    prNumber: number;
+    body: string;
+  }) => Promise<void>;
   postInlineReviewComment: (args: {
     repo: string;
     prNumber: number;
@@ -102,8 +104,8 @@ export async function postReviewOutput(params: {
   const context: PublishReviewContext = {
     repo: params.repo,
     prNumber: params.prNumber,
-    body: params.body,
-    inlineComments: params.inlineComments,
+    findings: params.findings,
+    preferTopLevelCommentOnly: params.preferTopLevelCommentOnly,
   };
 
   const adapter: ReviewPublisherAdapter = {
@@ -115,7 +117,7 @@ export async function postReviewOutput(params: {
       { repo, prNumber },
       comment: InlineReviewComment,
     ) => {
-      const line = resolveClosestCommentableLine(
+      const line = resolveExactCommentableLine(
         lineIndex,
         comment.path,
         comment.line,
@@ -138,14 +140,14 @@ export async function postReviewOutput(params: {
       });
     },
     postSummaryComment: async ({ repo, prNumber }, body) =>
-      params.postReviewComment(repo, prNumber, body),
+      params.postSummaryComment({ repo, prNumber, body }),
   };
 
   await publishReviewWithInlineComments({
     context,
     adapter,
     maxInlineComments: 20,
-    postSummaryWhenInlinePosted: false,
+    postSummaryWhenInlinePosted: params.postSummaryWhenInlinePosted,
     onInlineCommentError: (comment, error) => {
       console.error(
         `[reviewflux] failed to post inline comment: ${comment.path}:${comment.line}`,

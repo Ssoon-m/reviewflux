@@ -1,7 +1,11 @@
 import { promptSelect, promptText } from "../../cli/clack-prompter.js";
 import { loadConfig, saveConfig, type ReviewFluxConfig } from "../../cli/config.js";
+import {
+  normalizeRepoInput,
+  type PrReviewMode,
+} from "../../project/input.js";
 import { getSelectableModelsForProvider } from "../../llm/provider-catalog.js";
-import { ensureProviderCredentials, normalizeRepoInput, pickProjectProvider, type PrReviewMode } from "./shared.js";
+import { ensureProviderCredentials, pickProjectProvider } from "./shared.js";
 
 async function resolveProjectModelSelection(
   config: ReviewFluxConfig,
