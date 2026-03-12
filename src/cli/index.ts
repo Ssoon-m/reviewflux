@@ -1,31 +1,13 @@
 #!/usr/bin/env node
 import { CommanderError } from "commander";
 import { buildProgram } from "./program.js";
+import { normalizeRootArgs } from "./root-args.js";
 
 function applyExitOverride(command: import("commander").Command): void {
   command.exitOverride();
   for (const subcommand of command.commands) {
     applyExitOverride(subcommand);
   }
-}
-
-function normalizeRootArgs(
-  argv: string[],
-  groupCommandNames: ReadonlySet<string>,
-): string[] {
-  const [nodePath, scriptPath, command, ...rest] = argv;
-
-  if (
-    nodePath !== undefined &&
-    scriptPath !== undefined &&
-    command !== undefined &&
-    groupCommandNames.has(command) &&
-    rest.length === 0
-  ) {
-    return [nodePath, scriptPath, command, "--help"];
-  }
-
-  return argv;
 }
 
 async function main() {
