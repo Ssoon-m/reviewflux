@@ -1,6 +1,6 @@
 import { promptSelect, promptText } from "../../cli/clack-prompter.js";
 import { loadConfig, saveConfig, type ReviewFluxConfig } from "../../cli/config.js";
-import { normalizeRepoInput } from "../../config/project-input.js";
+import { normalizeRepoInput } from "../../project/input.js";
 import { getSelectableModelsForProvider } from "../../llm/provider-catalog.js";
 import { ensureProviderCredentials, pickProjectProvider } from "./shared.js";
 

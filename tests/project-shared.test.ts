@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   normalizeRepoInput,
   parsePrReviewMode,
-} from "../src/config/project-input.js";
+} from "../src/project/input.js";
 
 describe("project shared", () => {
   it("normalizes owner/repo from URL or plain input", () => {

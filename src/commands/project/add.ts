@@ -3,7 +3,7 @@ import { loadConfig, saveConfig, type ReviewFluxConfig } from "../../cli/config.
 import {
   normalizeRepoInput,
   type PrReviewMode,
-} from "../../config/project-input.js";
+} from "../../project/input.js";
 import { getSelectableModelsForProvider } from "../../llm/provider-catalog.js";
 import { ensureProviderCredentials, pickProjectProvider } from "./shared.js";
 

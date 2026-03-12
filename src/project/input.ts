@@ -1,6 +1,8 @@
-import { normalizeRepoKey } from "../llm/model-routing.js";
-
 export type PrReviewMode = "opened_once" | "on_push";
+
+export function normalizeRepoKey(repo: string): string {
+  return repo.trim().toLowerCase();
+}
 
 export function normalizeRepoInput(input: string): string {
   const trimmed = input.trim();
