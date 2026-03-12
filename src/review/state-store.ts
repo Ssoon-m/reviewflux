@@ -1,7 +1,6 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
 import { normalizeRepoKey } from "../project/input.js";
+import { ReviewQueueDatabase } from "./queue/database.js";
 
 export type ProjectReviewState = {
   initialized: boolean;
@@ -15,8 +14,26 @@ export type ReviewState = {
   projects: Record<string, ProjectReviewState>;
 };
 
-function reviewStatePath(home: string = homedir()): string {
-  return join(home, ".reviewflux", "daemon-state.json");
+function normalizeStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((entry): entry is string => typeof entry === "string");
+}
+
+function normalizeStringRecord(value: unknown): Record<string, string> {
+  if (!value || typeof value !== "object") return {};
+  return Object.fromEntries(
+    Object.entries(value).filter(
+      (entry): entry is [string, string] => typeof entry[1] === "string",
+    ),
+  );
+}
+
+function parseJson<T>(input: string, fallback: T): T {
+  try {
+    return JSON.parse(input) as T;
+  } catch {
+    return fallback;
+  }
 }
 
 function normalizeProjectReviewState(
@@ -24,30 +41,57 @@ function normalizeProjectReviewState(
 ): ProjectReviewState {
   return {
     initialized: state?.initialized ?? false,
-    prHeads: state?.prHeads ?? {},
-    seenForceCommentIds: state?.seenForceCommentIds ?? [],
-    postedReviewKeys: state?.postedReviewKeys ?? [],
-    handledManualTriggerKeys: state?.handledManualTriggerKeys ?? [],
+    prHeads: normalizeStringRecord(state?.prHeads),
+    seenForceCommentIds: normalizeStringArray(state?.seenForceCommentIds),
+    postedReviewKeys: normalizeStringArray(state?.postedReviewKeys),
+    handledManualTriggerKeys: normalizeStringArray(
+      state?.handledManualTriggerKeys,
+    ),
   };
 }
 
 export function loadReviewState(home: string = homedir()): ReviewState {
-  const path = reviewStatePath(home);
-  if (!existsSync(path)) {
-    return { projects: {} };
-  }
+  const database = new ReviewQueueDatabase({ home });
 
   try {
-    const parsed = JSON.parse(readFileSync(path, "utf8")) as Partial<ReviewState>;
+    const rows = database.connection.prepare(
+      `
+        SELECT
+          repo_key,
+          initialized,
+          pr_heads_json,
+          seen_force_comment_ids_json,
+          posted_review_keys_json,
+          handled_manual_trigger_keys_json
+        FROM review_runtime_state
+      `,
+    ).all() as Array<{
+      repo_key: string;
+      initialized: number;
+      pr_heads_json: string;
+      seen_force_comment_ids_json: string;
+      posted_review_keys_json: string;
+      handled_manual_trigger_keys_json: string;
+    }>;
+
     const projects = Object.fromEntries(
-      Object.entries(parsed.projects ?? {}).map(([repo, state]) => [
-        repo,
-        normalizeProjectReviewState(state),
+      rows.map((row) => [
+        row.repo_key,
+        normalizeProjectReviewState({
+          initialized: row.initialized === 1,
+          prHeads: parseJson(row.pr_heads_json, {}),
+          seenForceCommentIds: parseJson(row.seen_force_comment_ids_json, []),
+          postedReviewKeys: parseJson(row.posted_review_keys_json, []),
+          handledManualTriggerKeys: parseJson(
+            row.handled_manual_trigger_keys_json,
+            [],
+          ),
+        }),
       ]),
     );
     return { projects };
-  } catch {
-    return { projects: {} };
+  } finally {
+    database.close();
   }
 }
 
@@ -55,12 +99,42 @@ export function saveReviewState(
   state: ReviewState,
   home: string = homedir(),
 ): void {
-  const path = reviewStatePath(home);
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, `${JSON.stringify(state, null, 2)}\n`, {
-    encoding: "utf8",
-    mode: 0o600,
-  });
+  const database = new ReviewQueueDatabase({ home });
+  const updatedAt = new Date().toISOString();
+
+  try {
+    database.transaction(() => {
+      database.connection.exec(`DELETE FROM review_runtime_state`);
+      const statement = database.connection.prepare(
+        `
+          INSERT INTO review_runtime_state (
+            repo_key,
+            initialized,
+            pr_heads_json,
+            seen_force_comment_ids_json,
+            posted_review_keys_json,
+            handled_manual_trigger_keys_json,
+            updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        `,
+      );
+
+      for (const [repoKey, projectState] of Object.entries(state.projects)) {
+        const normalized = normalizeProjectReviewState(projectState);
+        statement.run(
+          repoKey,
+          normalized.initialized ? 1 : 0,
+          JSON.stringify(normalized.prHeads),
+          JSON.stringify(normalized.seenForceCommentIds),
+          JSON.stringify(normalized.postedReviewKeys),
+          JSON.stringify(normalized.handledManualTriggerKeys),
+          updatedAt,
+        );
+      }
+    });
+  } finally {
+    database.close();
+  }
 }
 
 export function buildProjectReviewState(
@@ -87,7 +161,8 @@ export function trackSeenCommentId(
   if (projectState.seenForceCommentIds.includes(id)) return;
   projectState.seenForceCommentIds.push(id);
   if (projectState.seenForceCommentIds.length > 500) {
-    projectState.seenForceCommentIds = projectState.seenForceCommentIds.slice(-500);
+    projectState.seenForceCommentIds =
+      projectState.seenForceCommentIds.slice(-500);
   }
 }
 
