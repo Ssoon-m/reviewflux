@@ -173,6 +173,14 @@ describe("runReviewJob", () => {
       replyToCommentId: "123",
       body,
     });
+    expect(mocks.postReviewOutputMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        repo: "ssoon-m/reviewflux",
+        prNumber: 7,
+        prHeadSha: "headsha",
+        postSummaryWhenInlinePosted: true,
+      }),
+    );
     expect(mocks.postPullRequestCommentMock).not.toHaveBeenCalled();
     expect(
       state.projects["ssoon-m/reviewflux"]?.handledManualTriggerKeys,

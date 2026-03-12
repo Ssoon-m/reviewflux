@@ -17,7 +17,7 @@ import {
 } from "../gateway/review-key.js";
 import type { ReviewFinding } from "../gateway/review-publisher.js";
 import { createLlmProvider } from "../llm/factory.js";
-import { normalizeRepoKey } from "../llm/model-routing.js";
+import { normalizeRepoKey } from "../project/input.js";
 import { buildReviewSystemPrompt, buildReviewUserPrompt } from "../llm/review-prompt.js";
 import { resolveCodexEffort } from "../llm/reasoning-effort.js";
 import { resolveReviewOutputFromModel } from "../llm/review-output.js";
@@ -463,7 +463,7 @@ export async function runReviewJob(params: {
         prNumber: params.prNumber,
         prHeadSha: pr.head.sha,
         findings: findingsToPost,
-        preferTopLevelCommentOnly: params.reason === "manual_force",
+        postSummaryWhenInlinePosted: params.reason === "manual_force",
         diff: review.diff,
         listPullRequestFiles,
         postSummaryComment: async ({ body }) => {

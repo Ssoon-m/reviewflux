@@ -8,6 +8,7 @@ function makeParams(overrides: Partial<Parameters<typeof postReviewOutput>[0]> =
     prHeadSha: "abc123head",
     findings: [],
     preferTopLevelCommentOnly: false,
+    postSummaryWhenInlinePosted: false,
     diff: "",
     listPullRequestFiles: vi.fn().mockResolvedValue([]),
     postSummaryComment: vi.fn().mockResolvedValue(undefined),
@@ -190,5 +191,44 @@ describe("review posting", () => {
     expect(postSummaryComment.mock.calls[0]?.[0].body).toBe(
       "🧠 ReviewFlux Review\n\n### Summary\nTop-level only review",
     );
+  });
+
+  it("can also post a follow-up summary after inline comments when enabled", async () => {
+    const listPullRequestFiles = vi
+      .fn()
+      .mockResolvedValue([{ filename: "src/a.ts" }]);
+    const postSummaryComment = vi.fn().mockResolvedValue(undefined);
+    const postInlineReviewComment = vi.fn().mockResolvedValue(undefined);
+    const params = makeParams({
+      findings: [
+        {
+          path: "src/a.ts",
+          line: 2,
+          body: "### Summary\nManual trigger finding",
+        },
+      ],
+      postSummaryWhenInlinePosted: true,
+      diff: [
+        "diff --git a/src/a.ts b/src/a.ts",
+        "--- a/src/a.ts",
+        "+++ b/src/a.ts",
+        "@@ -1,1 +1,2 @@",
+        " line one",
+        "+line two",
+      ].join("\n"),
+      listPullRequestFiles,
+      postSummaryComment,
+      postInlineReviewComment,
+    });
+
+    await postReviewOutput(params);
+
+    expect(postInlineReviewComment).toHaveBeenCalledTimes(1);
+    expect(postSummaryComment).toHaveBeenCalledTimes(1);
+    expect(postSummaryComment.mock.calls[0]?.[0]).toEqual({
+      repo: "ssoon-m/reviewflux",
+      prNumber: 42,
+      body: "🧠 ReviewFlux Review\n\n### Summary\nManual trigger finding",
+    });
   });
 });

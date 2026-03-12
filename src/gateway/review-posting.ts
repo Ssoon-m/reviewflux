@@ -81,6 +81,7 @@ export async function postReviewOutput(params: {
   prHeadSha: string;
   findings?: ReviewFinding[];
   preferTopLevelCommentOnly?: boolean;
+  postSummaryWhenInlinePosted?: boolean;
   diff: string;
   listPullRequestFiles: (
     repo: string,
@@ -146,7 +147,7 @@ export async function postReviewOutput(params: {
     context,
     adapter,
     maxInlineComments: 20,
-    postSummaryWhenInlinePosted: false,
+    postSummaryWhenInlinePosted: params.postSummaryWhenInlinePosted,
     onInlineCommentError: (comment, error) => {
       console.error(
         `[reviewflux] failed to post inline comment: ${comment.path}:${comment.line}`,
