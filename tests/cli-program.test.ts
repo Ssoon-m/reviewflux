@@ -25,6 +25,17 @@ describe("cli-program", () => {
     expect(stdout).toContain("project");
   });
 
+  it("shows root help when the help command is invoked without a topic", async () => {
+    const harness = createCommanderTestHarness(buildProgram);
+    const { error, stdout } = await harness.run(["help"]);
+
+    expect(error).toBeInstanceOf(CommanderError);
+    expect((error as CommanderError).code).toBe("commander.help");
+    expect(stdout).toContain("Usage: reviewflux");
+    expect(stdout).toContain("help [command]");
+    expect(stdout).toContain("daemon");
+  });
+
   it("shows help project from the Commander runtime", async () => {
     const harness = createCommanderTestHarness(buildProgram);
     const { error, stdout } = await harness.run(["help", "project"]);
