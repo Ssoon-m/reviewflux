@@ -24,6 +24,7 @@ import {
   type LlmProvider,
   type ReviewFluxConfig,
 } from "../../cli/config.js";
+import { reviewQueuePath } from "../../review/queue/index.js";
 import {
   loginWithPiOAuth,
   resolveOAuthProviderId,
@@ -66,6 +67,12 @@ export type SetupCommandDependencies = CommandBuilderDependencies<
 
 function globalAgentsPath(home: string): string {
   return join(home, GLOBAL_AGENTS_FILE);
+}
+
+function logSetupCompletion(path: string, home: string): void {
+  console.log(`\n[reviewflux] setup complete: ${path}`);
+  console.log(`[reviewflux] queue database: ${reviewQueuePath(home)}`);
+  console.log("Next: reviewflux daemon start");
 }
 
 function embeddedGlobalAgentsTemplate(): string {
@@ -408,6 +415,7 @@ function defaultBaseUrlForProvider(provider: string): string {
 
 /** Orchestrates prompts for custom provider; validation is delegated to llm/custom-provider. */
 async function saveCustomProviderConfig(): Promise<void> {
+  const home = ensureReviewFluxHome();
   const baseUrl = assertNonEmpty(
     await promptText({
       message: "Custom endpoint base URL",
@@ -474,8 +482,7 @@ async function saveCustomProviderConfig(): Promise<void> {
   };
 
   const path = saveConfig(config);
-  console.log(`\n[reviewflux] setup complete: ${path}`);
-  console.log("Next: reviewflux daemon start");
+  logSetupCompletion(path, home);
   releaseInteractiveInput();
 }
 
@@ -485,6 +492,7 @@ async function runSetup(options: SetupOptions): Promise<void> {
 
   console.log("[reviewflux] setup started");
   console.log(`[reviewflux] config directory: ${home}`);
+  console.log(`[reviewflux] queue database: ${reviewQueuePath(home)}`);
   if (globalAgents.created) {
     console.log(
       `[reviewflux] created global review guidance: ${globalAgentsPath(home)}`,
@@ -629,8 +637,7 @@ async function runSetup(options: SetupOptions): Promise<void> {
     };
 
     const path = saveConfig(config);
-    console.log(`\n[reviewflux] setup complete: ${path}`);
-    console.log("Next: reviewflux daemon start");
+    logSetupCompletion(path, home);
     releaseInteractiveInput();
     return;
   }
@@ -674,8 +681,7 @@ async function runSetup(options: SetupOptions): Promise<void> {
   };
 
   const path = saveConfig(config);
-  console.log(`\n[reviewflux] setup complete: ${path}`);
-  console.log("Next: reviewflux daemon start");
+  logSetupCompletion(path, home);
   releaseInteractiveInput();
 }
 
