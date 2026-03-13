@@ -10,17 +10,19 @@ export type InlineReviewComment = {
   body: string;
 };
 
+export type ReviewDeliveryMode = "inline-with-fallback" | "top-level-only";
+
 export type PublishReviewContext = {
   repo: string;
   prNumber: number;
   findings?: ReviewFinding[];
-  preferTopLevelCommentOnly?: boolean;
+  deliveryMode?: ReviewDeliveryMode;
 };
 
 export type PublishReviewResult = {
   attemptedInlineCount: number;
   postedInlineCount: number;
-  postedSummaryFallback: boolean;
+  postedTopLevelFallback: boolean;
 };
 
 export type ReviewPublisherAdapter = {
@@ -101,18 +103,17 @@ export async function publishReviewWithInlineComments(params: {
   context: PublishReviewContext;
   adapter: ReviewPublisherAdapter;
   maxInlineComments?: number;
-  postSummaryWhenInlinePosted?: boolean;
   onInlineCommentError?: (comment: InlineReviewComment, error: unknown) => void;
 }): Promise<PublishReviewResult> {
   const { context, adapter } = params;
   const findings = context.findings ?? [];
 
-  if (context.preferTopLevelCommentOnly) {
+  if (context.deliveryMode === "top-level-only") {
     await postTopLevelComments({ context, adapter, findings });
     return {
       attemptedInlineCount: 0,
       postedInlineCount: 0,
-      postedSummaryFallback: true,
+      postedTopLevelFallback: true,
     };
   }
 
@@ -126,7 +127,7 @@ export async function publishReviewWithInlineComments(params: {
     return {
       attemptedInlineCount: 0,
       postedInlineCount: 0,
-      postedSummaryFallback: true,
+      postedTopLevelFallback: true,
     };
   }
 
@@ -151,7 +152,7 @@ export async function publishReviewWithInlineComments(params: {
     return {
       attemptedInlineCount: 0,
       postedInlineCount: 0,
-      postedSummaryFallback: true,
+      postedTopLevelFallback: true,
     };
   }
 
@@ -180,7 +181,7 @@ export async function publishReviewWithInlineComments(params: {
     return {
       attemptedInlineCount: inline.length,
       postedInlineCount,
-      postedSummaryFallback: true,
+      postedTopLevelFallback: true,
     };
   }
 
@@ -193,20 +194,13 @@ export async function publishReviewWithInlineComments(params: {
     return {
       attemptedInlineCount: inline.length,
       postedInlineCount,
-      postedSummaryFallback: true,
+      postedTopLevelFallback: true,
     };
   }
 
-  if (params.postSummaryWhenInlinePosted) {
-    await postTopLevelComments({
-      context,
-      adapter,
-      findings: postedInline,
-    });
-  }
   return {
     attemptedInlineCount: inline.length,
     postedInlineCount,
-    postedSummaryFallback: false,
+    postedTopLevelFallback: false,
   };
 }
