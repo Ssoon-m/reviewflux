@@ -8,6 +8,7 @@ import {
   ReviewQueueDatabase,
   reviewQueuePath,
 } from "../src/review/queue/index.js";
+import { REVIEW_QUEUE_SCHEMA_VERSION } from "../src/review/queue/schema.js";
 import { loadReviewState, saveReviewState } from "../src/review/state-store.js";
 
 function makeTempHome(): string {
@@ -23,6 +24,38 @@ afterEach(() => {
 });
 
 describe("review queue storage", () => {
+  it("applies sqlite settings and bootstraps schema metadata", () => {
+    const home = makeTempHome();
+    homes.push(home);
+    const database = new ReviewQueueDatabase({ home });
+
+    try {
+      const journalMode = database.connection.pragma("journal_mode", {
+        simple: true,
+      }) as string;
+      const foreignKeys = database.connection.pragma("foreign_keys", {
+        simple: true,
+      }) as number;
+      const synchronousMode = database.connection.pragma("synchronous", {
+        simple: true,
+      }) as number;
+      const busyTimeout = database.connection.pragma("busy_timeout", {
+        simple: true,
+      }) as number;
+      const schemaVersion = database.connection
+        .prepare(`SELECT value FROM review_queue_meta WHERE key = ?`)
+        .get("schema_version") as { value: string } | undefined;
+
+      expect(journalMode.toLowerCase()).toBe("wal");
+      expect(foreignKeys).toBe(1);
+      expect(synchronousMode).toBe(1);
+      expect(busyTimeout).toBe(5000);
+      expect(schemaVersion?.value).toBe(String(REVIEW_QUEUE_SCHEMA_VERSION));
+    } finally {
+      database.close();
+    }
+  });
+
   it("persists runtime review state in sqlite", () => {
     const home = makeTempHome();
     homes.push(home);

@@ -2,10 +2,10 @@ import { createRequire } from "node:module";
 import { mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import type { DatabaseSync } from "node:sqlite";
 import { bootstrapReviewQueueSchema } from "./schema.js";
 
-type NodeSqliteModule = typeof import("node:sqlite");
+type BetterSqlite3Module = typeof import("better-sqlite3");
+type BetterSqlite3Database = import("better-sqlite3").Database;
 
 const require = createRequire(import.meta.url);
 
@@ -23,13 +23,13 @@ function resolveDatabasePath(options: ReviewQueueDatabaseOptions = {}): string {
   return reviewQueuePath(options.home);
 }
 
-function loadNodeSqlite(): NodeSqliteModule {
+function loadBetterSqlite3(): BetterSqlite3Module {
   try {
-    return require("node:sqlite") as NodeSqliteModule;
+    return require("better-sqlite3") as BetterSqlite3Module;
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
     throw new Error(
-      `Review queue storage requires node:sqlite support in this Node.js runtime. ${detail}`,
+      `Review queue storage requires better-sqlite3 support in this runtime. ${detail}`,
     );
   }
 }
@@ -42,10 +42,10 @@ export function assertReviewQueueRuntimeSupported(): void {
     );
   }
 
-  let database: DatabaseSync | null = null;
+  let database: BetterSqlite3Database | null = null;
   try {
-    const { DatabaseSync } = loadNodeSqlite();
-    database = new DatabaseSync(":memory:");
+    const Database = loadBetterSqlite3();
+    database = new Database(":memory:");
     database.exec("SELECT 1");
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
@@ -63,31 +63,18 @@ export class ReviewQueueDatabase {
   constructor(options: ReviewQueueDatabaseOptions = {}) {
     this.path = resolveDatabasePath(options);
     mkdirSync(dirname(this.path), { recursive: true });
-    const { DatabaseSync } = loadNodeSqlite();
-    this.connection = new DatabaseSync(this.path);
-    this.connection.exec("PRAGMA journal_mode = WAL");
-    this.connection.exec("PRAGMA synchronous = NORMAL");
-    this.connection.exec("PRAGMA foreign_keys = ON");
-    this.connection.exec("PRAGMA busy_timeout = 5000");
+    const Database = loadBetterSqlite3();
+    this.connection = new Database(this.path, { timeout: 5000 });
+    this.connection.pragma("journal_mode = WAL");
+    this.connection.pragma("synchronous = NORMAL");
+    this.connection.pragma("foreign_keys = ON");
     bootstrapReviewQueueSchema(this.connection);
   }
 
-  readonly connection: DatabaseSync;
+  readonly connection: BetterSqlite3Database;
 
   transaction<T>(action: () => T): T {
-    this.connection.exec("BEGIN IMMEDIATE");
-    try {
-      const result = action();
-      this.connection.exec("COMMIT");
-      return result;
-    } catch (error) {
-      try {
-        this.connection.exec("ROLLBACK");
-      } catch {
-        // Ignore rollback failures after the original error.
-      }
-      throw error;
-    }
+    return this.connection.transaction((work: () => T) => work()).immediate(action);
   }
 
   close(): void {

@@ -1,8 +1,8 @@
-import type { DatabaseSync } from "node:sqlite";
+type BetterSqlite3Database = import("better-sqlite3").Database;
 
 export const REVIEW_QUEUE_SCHEMA_VERSION = 1;
 
-export function bootstrapReviewQueueSchema(db: DatabaseSync): void {
+export function bootstrapReviewQueueSchema(db: BetterSqlite3Database): void {
   db.exec(`
     CREATE TABLE IF NOT EXISTS review_queue_meta (
       key TEXT PRIMARY KEY,
@@ -63,4 +63,3 @@ export function bootstrapReviewQueueSchema(db: DatabaseSync): void {
     ON CONFLICT(key) DO UPDATE SET value=excluded.value
   `).run("schema_version", String(REVIEW_QUEUE_SCHEMA_VERSION));
 }
-

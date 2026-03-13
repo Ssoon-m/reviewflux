@@ -22,6 +22,9 @@
   "author": "",
   "license": "ISC",
   "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
   "bugs": {
     "url": "https://github.com/Ssoon-m/issue-flow-ai/issues"
   },
@@ -29,12 +32,14 @@
   "dependencies": {
     "@clack/prompts": "^0.11.0",
     "@mariozechner/pi-ai": "0.56.2",
+    "better-sqlite3": "^12.6.2",
     "commander": "13.1.0",
     "dotenv": "^17.3.1",
     "express": "^5.2.1",
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
     "@types/express": "^5.0.6",
     "@types/node": "^25.3.0",
     "tsdown": "^0.20.3",
