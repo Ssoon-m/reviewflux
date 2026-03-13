@@ -1,6 +1,7 @@
 import { setTimeout as wait } from "node:timers/promises";
 import { loadConfig } from "../../cli/config.js";
 import { assertGhReady } from "../../review/github.js";
+import type { ProjectConfig } from "../../review/types.js";
 import {
   assertReviewQueueRuntimeSupported,
   ReviewJobStore,
@@ -35,6 +36,46 @@ const JOB_STALE_RUNNING_MS = Math.max(
   resolvePositiveInt(process.env.REVIEWFLUX_JOB_STALE_RUNNING_MS, 5 * 60_000),
   5_000,
 );
+
+type DaemonCycleCoordinator = Pick<ReviewPollCoordinator, "pollProject">;
+type DaemonCycleWorker = Pick<ReviewJobWorker, "drain" | "recoverStaleRunningJobs">;
+
+function logRecoveredJobs(recoveredJobs: number): void {
+  if (recoveredJobs > 0) {
+    console.log(`[reviewflux] recovered ${recoveredJobs} stale review job(s)`);
+  }
+}
+
+export async function runDaemonCycle(params: {
+  projects: ProjectConfig[];
+  coordinator: DaemonCycleCoordinator;
+  worker: DaemonCycleWorker;
+}): Promise<void> {
+  logRecoveredJobs(params.worker.recoverStaleRunningJobs());
+
+  try {
+    await params.worker.drain();
+  } catch (error) {
+    console.error("[reviewflux] review worker drain failed");
+    console.error(error instanceof Error ? error.message : String(error));
+  }
+
+  for (const project of params.projects) {
+    try {
+      await params.coordinator.pollProject(project);
+    } catch (error) {
+      console.error(`[reviewflux] polling failed for ${project.repo}`);
+      console.error(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  try {
+    await params.worker.drain();
+  } catch (error) {
+    console.error("[reviewflux] review worker drain failed");
+    console.error(error instanceof Error ? error.message : String(error));
+  }
+}
 
 export async function runDaemonStartCommand(): Promise<void> {
   const config = loadConfig();
@@ -91,27 +132,8 @@ export async function runDaemonStartCommand(): Promise<void> {
   process.once("SIGTERM", shutdown);
 
   try {
-    const recoveredJobs = worker.recoverStaleRunningJobs();
-    if (recoveredJobs > 0) {
-      console.log(`[reviewflux] recovered ${recoveredJobs} stale review job(s)`);
-    }
-
     while (!abortController.signal.aborted) {
-      for (const project of projects) {
-        try {
-          await coordinator.pollProject(project);
-        } catch (error) {
-          console.error(`[reviewflux] polling failed for ${project.repo}`);
-          console.error(error instanceof Error ? error.message : String(error));
-        }
-      }
-
-      try {
-        await worker.drain();
-      } catch (error) {
-        console.error("[reviewflux] review worker drain failed");
-        console.error(error instanceof Error ? error.message : String(error));
-      }
+      await runDaemonCycle({ projects, coordinator, worker });
 
       try {
         await wait(POLL_INTERVAL_MS, undefined, {

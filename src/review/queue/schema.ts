@@ -1,6 +1,27 @@
 type BetterSqlite3Database = import("better-sqlite3").Database;
 
-export const REVIEW_QUEUE_SCHEMA_VERSION = 1;
+export const REVIEW_QUEUE_SCHEMA_VERSION = 2;
+
+function hasColumn(
+  db: BetterSqlite3Database,
+  tableName: string,
+  columnName: string,
+): boolean {
+  const columns = db
+    .prepare(`PRAGMA table_info(${tableName})`)
+    .all() as Array<{ name: string }>;
+  return columns.some((column) => column.name === columnName);
+}
+
+function ensureColumn(
+  db: BetterSqlite3Database,
+  tableName: string,
+  columnName: string,
+  definition: string,
+): void {
+  if (hasColumn(db, tableName, columnName)) return;
+  db.exec(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${definition}`);
+}
 
 export function bootstrapReviewQueueSchema(db: BetterSqlite3Database): void {
   db.exec(`
@@ -47,6 +68,8 @@ export function bootstrapReviewQueueSchema(db: BetterSqlite3Database): void {
       attempts INTEGER NOT NULL DEFAULT 0,
       available_at TEXT NOT NULL,
       claimed_at TEXT,
+      worker_id TEXT,
+      heartbeat_at TEXT,
       completed_at TEXT,
       last_error TEXT,
       created_at TEXT NOT NULL,
@@ -55,6 +78,14 @@ export function bootstrapReviewQueueSchema(db: BetterSqlite3Database): void {
 
     CREATE INDEX IF NOT EXISTS review_jobs_claim_idx
       ON review_jobs (status, available_at, id);
+  `);
+
+  ensureColumn(db, "review_jobs", "worker_id", "TEXT");
+  ensureColumn(db, "review_jobs", "heartbeat_at", "TEXT");
+
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS review_jobs_running_heartbeat_idx
+      ON review_jobs (status, heartbeat_at);
   `);
 
   db.prepare(`

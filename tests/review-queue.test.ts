@@ -1,6 +1,8 @@
+import { mkdirSync } from "node:fs";
+import { createRequire } from "node:module";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   ReviewJobStore,
@@ -10,6 +12,9 @@ import {
 } from "../src/review/queue/index.js";
 import { REVIEW_QUEUE_SCHEMA_VERSION } from "../src/review/queue/schema.js";
 import { loadReviewState, saveReviewState } from "../src/review/state-store.js";
+
+const require = createRequire(import.meta.url);
+const BetterSqlite3 = require("better-sqlite3") as typeof import("better-sqlite3");
 
 function makeTempHome(): string {
   return mkdtempSync(join(tmpdir(), "reviewflux-queue-"));
@@ -45,12 +50,64 @@ describe("review queue storage", () => {
       const schemaVersion = database.connection
         .prepare(`SELECT value FROM review_queue_meta WHERE key = ?`)
         .get("schema_version") as { value: string } | undefined;
+      const reviewJobColumns = database.connection
+        .prepare(`PRAGMA table_info(review_jobs)`)
+        .all() as Array<{ name: string }>;
 
       expect(journalMode.toLowerCase()).toBe("wal");
       expect(foreignKeys).toBe(1);
       expect(synchronousMode).toBe(1);
       expect(busyTimeout).toBe(5000);
       expect(schemaVersion?.value).toBe(String(REVIEW_QUEUE_SCHEMA_VERSION));
+      expect(reviewJobColumns.map((column) => column.name)).toEqual(
+        expect.arrayContaining(["worker_id", "heartbeat_at"]),
+      );
+    } finally {
+      database.close();
+    }
+  });
+
+  it("migrates legacy review_jobs rows to include worker ownership columns", () => {
+    const home = makeTempHome();
+    homes.push(home);
+    const path = reviewQueuePath(home);
+    mkdirSync(dirname(path), { recursive: true });
+    const legacyDatabase = new BetterSqlite3(path);
+
+    try {
+      legacyDatabase.exec(`
+        CREATE TABLE review_jobs (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          repo_key TEXT NOT NULL,
+          pr_number INTEGER NOT NULL,
+          reason TEXT NOT NULL,
+          event_name TEXT NOT NULL,
+          event_key TEXT NOT NULL UNIQUE,
+          payload_json TEXT NOT NULL,
+          status TEXT NOT NULL,
+          attempts INTEGER NOT NULL DEFAULT 0,
+          available_at TEXT NOT NULL,
+          claimed_at TEXT,
+          completed_at TEXT,
+          last_error TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+      `);
+    } finally {
+      legacyDatabase.close();
+    }
+
+    const database = new ReviewQueueDatabase({ home });
+
+    try {
+      const reviewJobColumns = database.connection
+        .prepare(`PRAGMA table_info(review_jobs)`)
+        .all() as Array<{ name: string }>;
+
+      expect(reviewJobColumns.map((column) => column.name)).toEqual(
+        expect.arrayContaining(["worker_id", "heartbeat_at"]),
+      );
     } finally {
       database.close();
     }
@@ -146,24 +203,45 @@ describe("review queue storage", () => {
         }),
       ).toBe(false);
 
-      const claimed = jobStore.claimNextRunnableJob("2026-03-12T00:00:01.000Z");
-      expect(claimed).toMatchObject({
-        repoKey: "ssoon-m/reviewflux",
-        prNumber: 13,
-        status: "running",
-        attempts: 1,
-      });
+       const claimed = jobStore.claimNextRunnableJob({
+         workerId: "worker-a",
+         now: "2026-03-12T00:00:01.000Z",
+       });
+       expect(claimed).toMatchObject({
+         repoKey: "ssoon-m/reviewflux",
+         prNumber: 13,
+         status: "running",
+         attempts: 1,
+         workerId: "worker-a",
+         heartbeatAt: "2026-03-12T00:00:01.000Z",
+       });
 
-      expect(jobStore.claimNextRunnableJob("2026-03-12T00:00:02.000Z")).toBeNull();
+       expect(
+         jobStore.claimNextRunnableJob({
+           workerId: "worker-b",
+           now: "2026-03-12T00:00:02.000Z",
+         }),
+       ).toBeNull();
 
-      jobStore.markDone(claimed!.id, "2026-03-12T00:00:03.000Z");
-      expect(jobStore.claimNextRunnableJob("2026-03-12T00:00:04.000Z")).toBeNull();
-    } finally {
-      database.close();
-    }
-  });
+       expect(
+         jobStore.markDone({
+           jobId: claimed!.id,
+           workerId: "worker-a",
+           completedAt: "2026-03-12T00:00:03.000Z",
+         }),
+       ).toBe(true);
+       expect(
+         jobStore.claimNextRunnableJob({
+           workerId: "worker-a",
+           now: "2026-03-12T00:00:04.000Z",
+         }),
+       ).toBeNull();
+     } finally {
+       database.close();
+     }
+   });
 
-  it("requeues stale running jobs for a later retry", () => {
+  it("uses heartbeat freshness and worker ownership when recovering stale jobs", () => {
     const home = makeTempHome();
     homes.push(home);
     const database = new ReviewQueueDatabase({ home });
@@ -190,21 +268,56 @@ describe("review queue storage", () => {
         }),
       ).toBe(true);
 
-      const firstAttempt = jobStore.claimNextRunnableJob("2026-03-12T00:00:01.000Z");
-      expect(firstAttempt?.attempts).toBe(1);
+      const firstAttempt = jobStore.claimNextRunnableJob({
+        workerId: "worker-a",
+        now: "2026-03-12T00:00:01.000Z",
+      });
+      expect(firstAttempt).toMatchObject({
+        attempts: 1,
+        workerId: "worker-a",
+        heartbeatAt: "2026-03-12T00:00:01.000Z",
+      });
+
+      expect(
+        jobStore.markDone({
+          jobId: firstAttempt!.id,
+          workerId: "worker-b",
+          completedAt: "2026-03-12T00:00:02.000Z",
+        }),
+      ).toBe(false);
+
+      expect(
+        jobStore.refreshRunningJobHeartbeat({
+          jobId: firstAttempt!.id,
+          workerId: "worker-a",
+          heartbeatAt: "2026-03-12T00:00:03.000Z",
+        }),
+      ).toBe(true);
 
       expect(
         jobStore.recoverStaleRunningJobs(
           "2026-03-12T00:00:02.000Z",
-          "2026-03-12T00:00:03.000Z",
+          "2026-03-12T00:00:04.000Z",
+        ),
+      ).toBe(0);
+
+      expect(
+        jobStore.recoverStaleRunningJobs(
+          "2026-03-12T00:00:04.000Z",
+          "2026-03-12T00:00:05.000Z",
         ),
       ).toBe(1);
 
-      const retried = jobStore.claimNextRunnableJob("2026-03-12T00:00:04.000Z");
+      const retried = jobStore.claimNextRunnableJob({
+        workerId: "worker-b",
+        now: "2026-03-12T00:00:06.000Z",
+      });
       expect(retried).toMatchObject({
         eventKey: "issue_comment:123",
         status: "running",
         attempts: 2,
+        workerId: "worker-b",
+        heartbeatAt: "2026-03-12T00:00:06.000Z",
       });
     } finally {
       database.close();

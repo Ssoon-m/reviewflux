@@ -32,6 +32,8 @@ export type ReviewJobRecord = {
   attempts: number;
   availableAt: string;
   claimedAt: string | null;
+  workerId: string | null;
+  heartbeatAt: string | null;
   completedAt: string | null;
   lastError: string | null;
   createdAt: string;
@@ -45,4 +47,3 @@ export type ProjectPollSnapshot = {
   lastSeenReviewCommentId: number | null;
   prHeads: Record<string, string>;
 };
-
