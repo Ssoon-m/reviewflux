@@ -32,20 +32,20 @@ store that manages:
 
 ## Library Choice
 
-Initial implementation choice: use `node:sqlite` with raw SQL behind a small
-queue database wrapper.
+Initial implementation choice: use `better-sqlite3` with raw SQL behind a
+small queue database wrapper.
 
 Why:
 
-- zero extra runtime dependency for the CLI;
 - the daemon is a single-process local worker;
 - sync transactions simplify queue claim/ack flows;
+- `better-sqlite3` gives us a mature synchronous SQLite API for the queue;
 - we only need a small number of targeted tables;
 - raw SQL keeps queue semantics explicit.
 
-If `node:sqlite`'s experimental status becomes a packaging concern later, we can
-swap the connection layer to `better-sqlite3` without changing the higher-level
-review job and state interfaces.
+If the native install surface becomes a packaging concern later, we can revisit
+`node:sqlite` without changing the higher-level review job and state
+interfaces.
 
 ## Queue Strategy
 
@@ -419,7 +419,8 @@ This favors correctness over preserving brittle dedupe history.
 ## Risks
 
 - SQLite introduces a local database file and migration surface;
-- `node:sqlite` is still newer than long-established third-party bindings;
+- `better-sqlite3` adds a native dependency with prebuilt/toolchain install
+  considerations;
 - incorrect transaction boundaries could create duplicate or stuck jobs;
 - keeping completed jobs forever would grow the DB unnecessarily.
 

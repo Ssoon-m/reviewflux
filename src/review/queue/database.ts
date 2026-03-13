@@ -34,11 +34,15 @@ function loadBetterSqlite3(): BetterSqlite3Module {
   }
 }
 
+export function supportsReviewQueueNodeVersion(version: string): boolean {
+  const major = Number.parseInt(version.split(".")[0] ?? "", 10);
+  return Number.isFinite(major) && (major === 20 || major >= 22);
+}
+
 export function assertReviewQueueRuntimeSupported(): void {
-  const major = Number.parseInt(process.versions.node.split(".")[0] ?? "", 10);
-  if (!Number.isFinite(major) || major < 22) {
+  if (!supportsReviewQueueNodeVersion(process.versions.node)) {
     throw new Error(
-      `Review queue storage requires Node.js 22 or newer. Current version: ${process.versions.node}`,
+      `Review queue storage requires Node.js 20.x or 22+. Current version: ${process.versions.node}`,
     );
   }
 
@@ -61,6 +65,7 @@ export class ReviewQueueDatabase {
   readonly path: string;
 
   constructor(options: ReviewQueueDatabaseOptions = {}) {
+    assertReviewQueueRuntimeSupported();
     this.path = resolveDatabasePath(options);
     mkdirSync(dirname(this.path), { recursive: true });
     const Database = loadBetterSqlite3();

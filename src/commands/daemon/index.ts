@@ -4,34 +4,47 @@ import {
   type CommandBuilderDependencies,
 } from "../../cli/command-builder.js";
 
+type RunDaemonStartCommand = (typeof import("./start.js"))["runDaemonStartCommand"];
+type RunDaemonStopCommand = (typeof import("./stop.js"))["runDaemonStopCommand"];
+type RunDaemonStatusCommand = (typeof import("./status.js"))["runDaemonStatusCommand"];
+type RunDaemonInstallCommand = (typeof import("./install.js"))["runDaemonInstallCommand"];
+
 export type DaemonCommandHandlers = {
-  runDaemonStartCommand: () => Promise<void>;
-  runDaemonStopCommand: () => Promise<void>;
-  runDaemonStatusCommand: () => Promise<void>;
-  runDaemonInstallCommand: () => Promise<void>;
+  runDaemonStartCommand: RunDaemonStartCommand;
+  runDaemonStopCommand: RunDaemonStopCommand;
+  runDaemonStatusCommand: RunDaemonStatusCommand;
+  runDaemonInstallCommand: RunDaemonInstallCommand;
 };
 
 export type DaemonCommandDependencies = CommandBuilderDependencies<
   DaemonCommandHandlers
 >;
 
+export const runDaemonStartCommand: RunDaemonStartCommand = async (...args) => {
+  const module = await import("./start.js");
+  await module.runDaemonStartCommand(...args);
+};
+
+export const runDaemonStopCommand: RunDaemonStopCommand = async (...args) => {
+  const module = await import("./stop.js");
+  await module.runDaemonStopCommand(...args);
+};
+
+export const runDaemonStatusCommand: RunDaemonStatusCommand = async (...args) => {
+  const module = await import("./status.js");
+  await module.runDaemonStatusCommand(...args);
+};
+
+export const runDaemonInstallCommand: RunDaemonInstallCommand = async (...args) => {
+  const module = await import("./install.js");
+  await module.runDaemonInstallCommand(...args);
+};
+
 const defaultDaemonCommandHandlers: DaemonCommandHandlers = {
-  runDaemonStartCommand: async () => {
-    const module = await import("./start.js");
-    await module.runDaemonStartCommand();
-  },
-  runDaemonStopCommand: async () => {
-    const module = await import("./stop.js");
-    await module.runDaemonStopCommand();
-  },
-  runDaemonStatusCommand: async () => {
-    const module = await import("./status.js");
-    await module.runDaemonStatusCommand();
-  },
-  runDaemonInstallCommand: async () => {
-    const module = await import("./install.js");
-    await module.runDaemonInstallCommand();
-  },
+  runDaemonStartCommand,
+  runDaemonStopCommand,
+  runDaemonStatusCommand,
+  runDaemonInstallCommand,
 };
 
 export function buildDaemonCommand(
@@ -64,24 +77,4 @@ export function buildDaemonCommand(
   });
 
   return program;
-}
-
-export async function runDaemonStartCommand(): Promise<void> {
-  const module = await import("./start.js");
-  await module.runDaemonStartCommand();
-}
-
-export async function runDaemonStopCommand(): Promise<void> {
-  const module = await import("./stop.js");
-  await module.runDaemonStopCommand();
-}
-
-export async function runDaemonStatusCommand(): Promise<void> {
-  const module = await import("./status.js");
-  await module.runDaemonStatusCommand();
-}
-
-export async function runDaemonInstallCommand(): Promise<void> {
-  const module = await import("./install.js");
-  await module.runDaemonInstallCommand();
 }

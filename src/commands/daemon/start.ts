@@ -3,7 +3,6 @@ import { loadConfig } from "../../cli/config.js";
 import { assertGhReady } from "../../review/github.js";
 import type { ProjectConfig } from "../../review/types.js";
 import {
-  assertReviewQueueRuntimeSupported,
   ReviewJobStore,
   ReviewJobWorker,
   ReviewPollCoordinator,
@@ -92,7 +91,6 @@ export async function runDaemonStartCommand(): Promise<void> {
     return;
   }
 
-  assertReviewQueueRuntimeSupported();
   await assertGhReady();
 
   console.log(`[reviewflux] gh polling mode enabled (${POLL_INTERVAL_MS}ms)`);

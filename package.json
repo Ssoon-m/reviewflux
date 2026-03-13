@@ -23,7 +23,7 @@
   "license": "ISC",
   "type": "module",
   "engines": {
-    "node": ">=22"
+    "node": "^20.0.0 || >=22.0.0"
   },
   "bugs": {
     "url": "https://github.com/Ssoon-m/issue-flow-ai/issues"
