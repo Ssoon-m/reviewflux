@@ -139,6 +139,30 @@ describe("daemon start cycle", () => {
     }
   });
 
+  it("stops taking new work when the cycle aborts after the first drain", async () => {
+    const abortController = new AbortController();
+    const worker = {
+      recoverStaleRunningJobs: vi.fn(() => 0),
+      drain: vi.fn(async (_options?: { signal?: AbortSignal }) => {
+        abortController.abort();
+        return 1;
+      }),
+    };
+    const coordinator = {
+      pollProject: vi.fn(async () => {}),
+    };
+
+    await runDaemonCycle({
+      projects: [makeProject("a/repo"), makeProject("b/repo")],
+      coordinator,
+      worker,
+      abortSignal: abortController.signal,
+    });
+
+    expect(worker.drain).toHaveBeenCalledTimes(1);
+    expect(coordinator.pollProject).not.toHaveBeenCalled();
+  });
+
   it("writes daemon cycle events to the daemon log", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-03-14T09:00:00.000Z"));
@@ -482,6 +506,211 @@ describe("daemon start cycle", () => {
         message: "Daemon stopped",
         context: {},
       });
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
+
+  it("waits for in-flight cycle work before logging daemon stopped on signal", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-14T12:30:00.000Z"));
+
+    const home = makeTempHome();
+    homes.push(home);
+    process.env.HOME = home;
+
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const signalHandlers = new Map<string, () => void>();
+    const unregisterCalls: string[] = [];
+
+    let markCycleStarted!: () => void;
+    const cycleStarted = new Promise<void>((resolve) => {
+      markCycleStarted = resolve;
+    });
+
+    let releaseCycle!: () => void;
+    const cycleRelease = new Promise<void>((resolve) => {
+      releaseCycle = resolve;
+    });
+
+    const waitCalls: Array<number | undefined> = [];
+    const waitForAbort = async <T>(
+      delay?: number,
+      value?: T,
+      options?: { signal?: AbortSignal },
+    ): Promise<T> => {
+      waitCalls.push(delay);
+      if (options?.signal?.aborted) {
+        throw new Error("aborted");
+      }
+
+      return value as T;
+    };
+
+    let settled = false;
+
+    try {
+      const commandPromise = runDaemonStartCommand({
+        loadConfig: () => makeConfig({
+          alpha: {
+            repo: "a/repo",
+            pr: { mode: "on_push", forceCommand: "@reviewflux" },
+            modelAlias: "gpt-5.4",
+            context: { mode: "default" },
+          },
+        }),
+        assertGhReady: vi.fn(async () => {}),
+        registerSignalHandler: (signal, listener) => {
+          signalHandlers.set(signal, listener);
+          return () => {
+            unregisterCalls.push(signal);
+            signalHandlers.delete(signal);
+          };
+        },
+        runCycle: vi.fn(async () => {
+          markCycleStarted();
+          signalHandlers.get("SIGTERM")?.();
+          await cycleRelease;
+        }),
+        wait: waitForAbort,
+      }).then(() => {
+        settled = true;
+      });
+
+      await cycleStarted;
+      await Promise.resolve();
+
+      expect(settled).toBe(false);
+      expect(waitCalls).toEqual([]);
+      expect(unregisterCalls).toEqual([]);
+      expect(signalHandlers.size).toBe(2);
+      expect(logSpy.mock.calls.map(([message]) => message)).toEqual([
+        "[reviewflux] daemon start",
+        "[reviewflux] gh polling mode enabled (30000ms)",
+        "[reviewflux] tracking 1 project(s)",
+        "- a/repo | mode=on_push | model=gpt-5.4 | context=default:AGENTS.md",
+        "[reviewflux] force command is always enabled: @reviewflux",
+        `[reviewflux] queue database: ${reviewQueuePath(home)}`,
+      ]);
+
+      releaseCycle();
+      await commandPromise;
+
+      expect(waitCalls).toEqual([30000]);
+      expect(unregisterCalls).toEqual(["SIGINT", "SIGTERM"]);
+      expect(signalHandlers.size).toBe(0);
+      expect(logSpy.mock.calls.map(([message]) => message)).toEqual([
+        "[reviewflux] daemon start",
+        "[reviewflux] gh polling mode enabled (30000ms)",
+        "[reviewflux] tracking 1 project(s)",
+        "- a/repo | mode=on_push | model=gpt-5.4 | context=default:AGENTS.md",
+        "[reviewflux] force command is always enabled: @reviewflux",
+        `[reviewflux] queue database: ${reviewQueuePath(home)}`,
+        "\n[reviewflux] daemon stopped",
+      ]);
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
+
+  it("finishes the active cycle before shutdown and stops taking new work after signal", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-14T12:30:00.000Z"));
+
+    const home = makeTempHome();
+    homes.push(home);
+    process.env.HOME = home;
+
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const signalHandlers = new Map<string, () => void>();
+    const unregisterCalls: string[] = [];
+
+    let markCycleStarted!: () => void;
+    const cycleStarted = new Promise<void>((resolve) => {
+      markCycleStarted = resolve;
+    });
+
+    let releaseCycle!: () => void;
+    const cycleRelease = new Promise<void>((resolve) => {
+      releaseCycle = resolve;
+    });
+
+    const waitCalls: Array<number | undefined> = [];
+    const waitForAbort = async <T>(
+      delay?: number,
+      value?: T,
+      options?: { signal?: AbortSignal },
+    ): Promise<T> => {
+      waitCalls.push(delay);
+      if (options?.signal?.aborted) {
+        throw new Error("aborted");
+      }
+
+      return value as T;
+    };
+
+    let settled = false;
+
+    try {
+      const commandPromise = runDaemonStartCommand({
+        loadConfig: () => makeConfig({
+          alpha: {
+            repo: "a/repo",
+            pr: { mode: "on_push", forceCommand: "@reviewflux" },
+            modelAlias: "gpt-5.4",
+            context: { mode: "default" },
+          },
+        }),
+        assertGhReady: vi.fn(async () => {}),
+        registerSignalHandler: (signal, listener) => {
+          signalHandlers.set(signal, listener);
+          return () => {
+            unregisterCalls.push(signal);
+            signalHandlers.delete(signal);
+          };
+        },
+        runCycle: vi.fn(async ({ abortSignal }) => {
+          markCycleStarted();
+          signalHandlers.get("SIGTERM")?.();
+          expect(abortSignal?.aborted).toBe(true);
+          await cycleRelease;
+        }),
+        wait: waitForAbort,
+      }).then(() => {
+        settled = true;
+      });
+
+      await cycleStarted;
+      await Promise.resolve();
+
+      expect(settled).toBe(false);
+      expect(waitCalls).toEqual([]);
+      expect(unregisterCalls).toEqual([]);
+      expect(signalHandlers.size).toBe(2);
+      expect(logSpy.mock.calls.map(([message]) => message)).toEqual([
+        "[reviewflux] daemon start",
+        "[reviewflux] gh polling mode enabled (30000ms)",
+        "[reviewflux] tracking 1 project(s)",
+        "- a/repo | mode=on_push | model=gpt-5.4 | context=default:AGENTS.md",
+        "[reviewflux] force command is always enabled: @reviewflux",
+        `[reviewflux] queue database: ${reviewQueuePath(home)}`,
+      ]);
+
+      releaseCycle();
+      await commandPromise;
+
+      expect(waitCalls).toEqual([30000]);
+      expect(unregisterCalls).toEqual(["SIGINT", "SIGTERM"]);
+      expect(signalHandlers.size).toBe(0);
+      expect(logSpy.mock.calls.map(([message]) => message)).toEqual([
+        "[reviewflux] daemon start",
+        "[reviewflux] gh polling mode enabled (30000ms)",
+        "[reviewflux] tracking 1 project(s)",
+        "- a/repo | mode=on_push | model=gpt-5.4 | context=default:AGENTS.md",
+        "[reviewflux] force command is always enabled: @reviewflux",
+        `[reviewflux] queue database: ${reviewQueuePath(home)}`,
+        "\n[reviewflux] daemon stopped",
+      ]);
     } finally {
       logSpy.mockRestore();
     }

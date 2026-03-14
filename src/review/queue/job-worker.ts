@@ -100,10 +100,14 @@ export class ReviewJobWorker {
     );
   }
 
-  async drain(): Promise<number> {
+  async drain(options: { signal?: AbortSignal } = {}): Promise<number> {
     let processed = 0;
 
     while (true) {
+      if (options.signal?.aborted) {
+        break;
+      }
+
       const job = this.jobStore.claimNextRunnableJob({ workerId: this.workerId });
       if (!job) break;
 
@@ -240,6 +244,10 @@ export class ReviewJobWorker {
       }
 
       processed += 1;
+
+      if (options.signal?.aborted) {
+        break;
+      }
     }
 
     return processed;

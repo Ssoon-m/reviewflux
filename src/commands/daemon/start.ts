@@ -76,6 +76,7 @@ type DaemonStartCollaborators = {
     coordinator: DaemonCycleCoordinator;
     worker: DaemonCycleWorker;
     logDaemonEvent?: DaemonEventLogger;
+    abortSignal?: AbortSignal;
   }) => Promise<void>;
   logging?: typeof logging;
 };
@@ -108,6 +109,7 @@ export async function runDaemonCycle(params: {
   coordinator: DaemonCycleCoordinator;
   worker: DaemonCycleWorker;
   logDaemonEvent?: DaemonEventLogger;
+  abortSignal?: AbortSignal;
 }): Promise<void> {
   const logDaemonEvent = params.logDaemonEvent ?? createDaemonEventLogger(logging);
   const recoveredJobs = params.worker.recoverStaleRunningJobs();
@@ -123,8 +125,12 @@ export async function runDaemonCycle(params: {
     });
   }
 
+  if (params.abortSignal?.aborted) {
+    return;
+  }
+
   try {
-    await params.worker.drain();
+    await params.worker.drain({ signal: params.abortSignal });
   } catch (error) {
     const errorMessage = resolveErrorMessage(error);
     console.error("[reviewflux] review worker drain failed");
@@ -138,7 +144,15 @@ export async function runDaemonCycle(params: {
     });
   }
 
+  if (params.abortSignal?.aborted) {
+    return;
+  }
+
   for (const project of params.projects) {
+    if (params.abortSignal?.aborted) {
+      return;
+    }
+
     try {
       await params.coordinator.pollProject(project);
     } catch (error) {
@@ -158,8 +172,12 @@ export async function runDaemonCycle(params: {
     }
   }
 
+  if (params.abortSignal?.aborted) {
+    return;
+  }
+
   try {
-    await params.worker.drain();
+    await params.worker.drain({ signal: params.abortSignal });
   } catch (error) {
     const errorMessage = resolveErrorMessage(error);
     console.error("[reviewflux] review worker drain failed");
@@ -183,7 +201,7 @@ export async function runDaemonStartCommand(
   const registerSignalHandler =
     collaborators.registerSignalHandler
     ?? ((signal: "SIGINT" | "SIGTERM", listener: () => void) => {
-      process.once(signal, listener);
+      process.on(signal, listener);
       return () => {
         process.off(signal, listener);
       };
@@ -277,7 +295,6 @@ export async function runDaemonStartCommand(
       return;
     }
     abortController.abort();
-    logDaemonStopped();
   };
 
   for (const signal of ["SIGINT", "SIGTERM"] as const) {
@@ -303,7 +320,13 @@ export async function runDaemonStartCommand(
 
   try {
     while (!abortController.signal.aborted) {
-      await runCycle({ projects, coordinator, worker, logDaemonEvent });
+      await runCycle({
+        projects,
+        coordinator,
+        worker,
+        logDaemonEvent,
+        abortSignal: abortController.signal,
+      });
 
       try {
         await waitForNextPoll(POLL_INTERVAL_MS, undefined, {
