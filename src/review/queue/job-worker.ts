@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { logging } from "../../infra/logging/index.js";
 import { runQueuedReviewJob } from "../runtime.js";
 import type { ReviewJobStore } from "./job-store.js";
 
@@ -6,8 +7,53 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function redactedErrorMessage(event: string): string {
+  switch (event) {
+    case "job_retry_scheduled":
+      return "job_retry_scheduled_error";
+    case "job_retry_skipped_ownership_lost":
+      return "job_retry_skipped_ownership_lost_error";
+    case "job_failed":
+      return "job_failed_error";
+    case "job_failure_skipped_ownership_lost":
+      return "job_failure_skipped_ownership_lost_error";
+    default:
+      return "review_job_error";
+  }
+}
+
 function delayIso(ms: number): string {
   return new Date(Date.now() + ms).toISOString();
+}
+
+function logJobTransition(input: {
+  job: {
+    repoKey: string;
+    prNumber: number;
+    eventKey: string;
+    attempts: number;
+  };
+  workerId: string;
+  event: string;
+  level: "info" | "warn" | "error";
+  message: string;
+  errorMessage?: string;
+}): void {
+  logging({
+    surface: "queue-worker",
+    type: "queue",
+    level: input.level,
+    event: input.event,
+    message: input.message,
+    context: {
+      repo: input.job.repoKey,
+      prNumber: input.job.prNumber,
+      eventKey: input.job.eventKey,
+      attempt: input.job.attempts,
+      workerId: input.workerId,
+      errorMessage: input.errorMessage,
+    },
+  });
 }
 
 export type ReviewJobWorkerOptions = {
@@ -61,6 +107,13 @@ export class ReviewJobWorker {
       const job = this.jobStore.claimNextRunnableJob({ workerId: this.workerId });
       if (!job) break;
 
+      logJobTransition({
+        job,
+        workerId: this.workerId,
+        event: "job_started",
+        level: "info",
+        message: "Review job started",
+      });
       console.log(
         `[reviewflux] review job started: ${job.repoKey}#${job.prNumber} key=${job.eventKey} attempt=${job.attempts}`,
       );
@@ -73,6 +126,13 @@ export class ReviewJobWorker {
         });
         if (!refreshed && !lostOwnership) {
           lostOwnership = true;
+          logJobTransition({
+            job,
+            workerId: this.workerId,
+            event: "job_heartbeat_lost_ownership",
+            level: "warn",
+            message: "Review job heartbeat lost ownership",
+          });
           console.error(
             `[reviewflux] review job heartbeat lost ownership: ${job.repoKey}#${job.prNumber} key=${job.eventKey}`,
           );
@@ -86,10 +146,24 @@ export class ReviewJobWorker {
           workerId: this.workerId,
         });
         if (markedDone) {
+          logJobTransition({
+            job,
+            workerId: this.workerId,
+            event: "job_completed",
+            level: "info",
+            message: "Review job completed",
+          });
           console.log(
             `[reviewflux] review job completed: ${job.repoKey}#${job.prNumber} key=${job.eventKey}`,
           );
         } else {
+          logJobTransition({
+            job,
+            workerId: this.workerId,
+            event: "job_completion_skipped_ownership_lost",
+            level: "warn",
+            message: "Review job completion skipped after ownership lost",
+          });
           console.error(
             `[reviewflux] review job completion skipped (ownership lost): ${job.repoKey}#${job.prNumber} key=${job.eventKey}`,
           );
@@ -105,10 +179,26 @@ export class ReviewJobWorker {
             availableAt,
           });
           if (scheduled) {
+            logJobTransition({
+              job,
+              workerId: this.workerId,
+              event: "job_retry_scheduled",
+              level: "warn",
+              message: "Review job retry scheduled",
+              errorMessage: redactedErrorMessage("job_retry_scheduled"),
+            });
             console.error(
               `[reviewflux] review job retry scheduled: ${job.repoKey}#${job.prNumber} key=${job.eventKey} error=${message}`,
             );
           } else {
+            logJobTransition({
+              job,
+              workerId: this.workerId,
+              event: "job_retry_skipped_ownership_lost",
+              level: "warn",
+              message: "Review job retry skipped after ownership lost",
+              errorMessage: redactedErrorMessage("job_retry_skipped_ownership_lost"),
+            });
             console.error(
               `[reviewflux] review job retry skipped (ownership lost): ${job.repoKey}#${job.prNumber} key=${job.eventKey} error=${message}`,
             );
@@ -120,10 +210,26 @@ export class ReviewJobWorker {
             error: message,
           });
           if (markedFailed) {
+            logJobTransition({
+              job,
+              workerId: this.workerId,
+              event: "job_failed",
+              level: "error",
+              message: "Review job failed",
+              errorMessage: redactedErrorMessage("job_failed"),
+            });
             console.error(
               `[reviewflux] review job failed: ${job.repoKey}#${job.prNumber} key=${job.eventKey} error=${message}`,
             );
           } else {
+            logJobTransition({
+              job,
+              workerId: this.workerId,
+              event: "job_failure_skipped_ownership_lost",
+              level: "warn",
+              message: "Review job failure skipped after ownership lost",
+              errorMessage: redactedErrorMessage("job_failure_skipped_ownership_lost"),
+            });
             console.error(
               `[reviewflux] review job failure skipped (ownership lost): ${job.repoKey}#${job.prNumber} key=${job.eventKey} error=${message}`,
             );
