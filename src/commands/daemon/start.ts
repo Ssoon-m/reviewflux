@@ -1,6 +1,9 @@
 import { setTimeout as wait } from "node:timers/promises";
 import { loadConfig } from "../../cli/config.js";
-import { logging } from "../../infra/logging/index.js";
+import {
+  logging,
+  sanitizeOperationalLogMessage,
+} from "../../infra/logging/index.js";
 import { assertGhReady } from "../../review/github.js";
 import {
   ReviewJobStore,
@@ -100,37 +103,6 @@ function resolveErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function sanitizeDaemonErrorMessage(error: unknown, fallback: string): string {
-  const raw = resolveErrorMessage(error)
-    .split(/\r?\n/, 1)[0]
-    .replace(/\s+/g, " ")
-    .trim();
-
-  if (!raw) {
-    return fallback;
-  }
-
-  const sanitized = raw
-    .replace(
-      /([?&](?:access_token|refresh_token|client_secret|api_key|token|code|state)=)[^&\s]+/gi,
-      "$1[redacted]",
-    )
-    .replace(/\bbearer\s+[^\s,;]+/gi, "bearer [redacted]")
-    .replace(
-      /\b(access[_-]?token|refresh[_-]?token|client[_-]?secret|api[_-]?key|secret|token|authorization|code|state)\s*[:=]\s*[^\s,;]+/gi,
-      "$1=[redacted]",
-    )
-    .replace(/\bsk-[A-Za-z0-9_-]+\b/g, "[redacted]")
-    .replace(/\bgh[pousr]_[A-Za-z0-9_]+\b/gi, "[redacted]")
-    .trim();
-
-  if (!sanitized) {
-    return fallback;
-  }
-
-  return sanitized.slice(0, 160);
-}
-
 function logRecoveredJobs(recoveredJobs: number): void {
   if (recoveredJobs > 0) {
     console.log(`[reviewflux] recovered ${recoveredJobs} stale review job(s)`);
@@ -169,8 +141,8 @@ export async function runDaemonCycle(params: {
       level: "error",
       message: "Review worker drain failed",
       context: {
-        errorMessage: sanitizeDaemonErrorMessage(
-          error,
+        errorMessage: sanitizeOperationalLogMessage(
+          errorMessage,
           DAEMON_WORKER_DRAIN_FAILED_ERROR,
         ),
       },
@@ -191,7 +163,10 @@ export async function runDaemonCycle(params: {
         message: "Project polling failed",
         context: {
           repo: project.repo,
-          errorMessage: sanitizeDaemonErrorMessage(error, DAEMON_POLL_FAILED_ERROR),
+          errorMessage: sanitizeOperationalLogMessage(
+            errorMessage,
+            DAEMON_POLL_FAILED_ERROR,
+          ),
         },
       });
     }
@@ -209,8 +184,8 @@ export async function runDaemonCycle(params: {
       level: "error",
       message: "Review worker drain failed",
       context: {
-        errorMessage: sanitizeDaemonErrorMessage(
-          error,
+        errorMessage: sanitizeOperationalLogMessage(
+          errorMessage,
           DAEMON_WORKER_DRAIN_FAILED_ERROR,
         ),
       },
