@@ -7,20 +7,24 @@ import { apiKeyFromPiOAuth, refreshWithPiOAuth } from "../auth/pi-oauth.js";
 import {
   getActiveAuthProfile,
   loadConfig,
-  saveConfig,
   type ReviewFluxConfig,
+  saveConfig,
 } from "../cli/config.js";
-import { postReviewOutput } from "../gateway/review-posting.js";
 import {
   createPostedReviewKey,
   hasPostedReviewKey,
 } from "../gateway/review-key.js";
+import { postReviewOutput } from "../gateway/review-posting.js";
 import type { ReviewFinding } from "../gateway/review-publisher.js";
+import { logging } from "../infra/logging/index.js";
 import { createLlmProvider } from "../llm/factory.js";
-import { normalizeRepoKey } from "../project/input.js";
-import { buildReviewSystemPrompt, buildReviewUserPrompt } from "../llm/review-prompt.js";
 import { resolveCodexEffort } from "../llm/reasoning-effort.js";
 import { resolveReviewOutputFromModel } from "../llm/review-output.js";
+import {
+  buildReviewSystemPrompt,
+  buildReviewUserPrompt,
+} from "../llm/review-prompt.js";
+import { normalizeRepoKey } from "../project/input.js";
 import { createFindingFingerprint } from "./finding-fingerprint.js";
 import {
   buildRemoteProjectContextText,
@@ -42,19 +46,49 @@ import {
   buildProjectReviewState,
   hasHandledManualTriggerKey,
   loadReviewState,
+  type ReviewState,
   saveReviewState,
   trackHandledManualTriggerKey,
   trackPostedReviewKey,
-  type ReviewState,
 } from "./state-store.js";
-import type { ProjectConfig, PullRequestDetail, ReviewTriggerReason } from "./types.js";
+import type {
+  ProjectConfig,
+  PullRequestDetail,
+  ReviewTriggerReason,
+} from "./types.js";
 
 const REVIEW_TITLE = "🧠 ReviewFlux Review";
 const MAX_GLOBAL_AGENTS_CHARS = 6000;
 const MAX_BASE_POLICY_CHARS = 6000;
 const BASE_POLICY_FILE = "REVIEWFLUX-AGENTS.md";
+const REVIEW_CONTEXT_LOAD_FAILED_ERROR = "project_context_load_failed";
 
 const inFlightReviewKeys = new Set<string>();
+
+type ReviewRuntimeLogEvent =
+  | "review_skipped_already_posted"
+  | "review_skipped_manual_trigger_handled"
+  | "review_skipped_in_flight_duplicate"
+  | "review_context_load_failed"
+  | "review_skipped_no_new_findings"
+  | "review_manual_no_new_findings_response"
+  | "review_posted";
+
+function logReviewRuntimeEvent(input: {
+  level: "info" | "warn" | "error";
+  event: ReviewRuntimeLogEvent;
+  message: string;
+  context?: Record<string, unknown>;
+}): void {
+  logging({
+    surface: "review-runtime",
+    type: "review",
+    level: input.level,
+    event: input.event,
+    message: input.message,
+    context: input.context,
+  });
+}
 
 function globalAgentsPath(home: string = homedir()): string {
   return join(home, ".reviewflux", "AGENTS.md");
@@ -75,9 +109,7 @@ function loadBasePolicyGuidance(): string {
     try {
       const content = readFileSync(path, "utf8").trim();
       if (content) return content.slice(0, MAX_BASE_POLICY_CHARS);
-    } catch {
-      continue;
-    }
+    } catch {}
   }
 
   return "";
@@ -160,7 +192,9 @@ function filterAlreadyPostedFindings(params: {
 }): ReviewFinding[] {
   return params.findings.filter((finding) => {
     const fingerprint = createFindingFingerprint(finding.body);
-    return fingerprint.length === 0 || !params.existingFingerprints.has(fingerprint);
+    return (
+      fingerprint.length === 0 || !params.existingFingerprints.has(fingerprint)
+    );
   });
 }
 
@@ -383,6 +417,18 @@ export async function runReviewJob(params: {
       reason: params.reason,
     })
   ) {
+    logReviewRuntimeEvent({
+      level: "info",
+      event: "review_skipped_already_posted",
+      message:
+        "Skipped automatic review because it was already posted for this PR head.",
+      context: {
+        repo: params.repo,
+        prNumber: params.prNumber,
+        reason: params.reason,
+        eventKey: postedReviewKey,
+      },
+    });
     console.log(
       `[reviewflux] review skipped (already posted): ${params.repo}#${params.prNumber} reason=${params.reason}`,
     );
@@ -393,6 +439,17 @@ export async function runReviewJob(params: {
     manualTriggerKey &&
     hasHandledManualTriggerKey(projectState, manualTriggerKey)
   ) {
+    logReviewRuntimeEvent({
+      level: "info",
+      event: "review_skipped_manual_trigger_handled",
+      message: "Skipped manual review because the trigger was already handled.",
+      context: {
+        repo: params.repo,
+        prNumber: params.prNumber,
+        reason: params.reason,
+        eventKey: manualTriggerKey,
+      },
+    });
     console.log(
       `[reviewflux] review skipped (manual trigger already handled): ${params.repo}#${params.prNumber} trigger=${manualTriggerKey}`,
     );
@@ -400,6 +457,18 @@ export async function runReviewJob(params: {
   }
 
   if (inFlightReviewKeys.has(inFlightKey)) {
+    logReviewRuntimeEvent({
+      level: "info",
+      event: "review_skipped_in_flight_duplicate",
+      message:
+        "Skipped duplicate review because an equivalent review is already in flight.",
+      context: {
+        repo: params.repo,
+        prNumber: params.prNumber,
+        reason: params.reason,
+        eventKey: inFlightKey,
+      },
+    });
     console.log(
       `[reviewflux] review skipped (in-flight duplicate): ${params.repo}#${params.prNumber} key=${inFlightKey}`,
     );
@@ -415,6 +484,19 @@ export async function runReviewJob(params: {
         pr.base.sha,
       );
     } catch (error) {
+      logReviewRuntimeEvent({
+        level: "error",
+        event: "review_context_load_failed",
+        message:
+          "Failed to load project context; continuing without remote context.",
+        context: {
+          repo: params.repo,
+          prNumber: params.prNumber,
+          reason: params.reason,
+          eventKey: inFlightKey,
+          errorMessage: REVIEW_CONTEXT_LOAD_FAILED_ERROR,
+        },
+      });
       console.error(
         `[reviewflux] failed to load context for ${params.repo}@${pr.base.sha}`,
       );
@@ -453,7 +535,33 @@ export async function runReviewJob(params: {
         body: buildNoNewFindingBody(),
         trigger: params.manualTrigger,
       });
-    } else if (resolvedReview.findings.length > 0 && findingsToPost.length === 0) {
+      logReviewRuntimeEvent({
+        level: "info",
+        event: "review_manual_no_new_findings_response",
+        message: "Posted manual no-new-findings response.",
+        context: {
+          repo: params.repo,
+          prNumber: params.prNumber,
+          reason: params.reason,
+          eventKey: manualTriggerKey ?? postedReviewKey,
+        },
+      });
+    } else if (
+      resolvedReview.findings.length > 0 &&
+      findingsToPost.length === 0
+    ) {
+      logReviewRuntimeEvent({
+        level: "info",
+        event: "review_skipped_no_new_findings",
+        message:
+          "Skipped posting because all findings already exist on the pull request.",
+        context: {
+          repo: params.repo,
+          prNumber: params.prNumber,
+          reason: params.reason,
+          eventKey: postedReviewKey,
+        },
+      });
       console.log(
         `[reviewflux] review skipped (no new findings): ${params.repo}#${params.prNumber} reason=${params.reason}`,
       );
@@ -482,6 +590,17 @@ export async function runReviewJob(params: {
           });
         },
         postInlineReviewComment,
+      });
+      logReviewRuntimeEvent({
+        level: "info",
+        event: "review_posted",
+        message: "Posted review findings.",
+        context: {
+          repo: params.repo,
+          prNumber: params.prNumber,
+          reason: params.reason,
+          eventKey: postedReviewKey,
+        },
       });
       console.log(
         `[reviewflux] review posted: ${params.repo}#${params.prNumber} reason=${params.reason}`,
