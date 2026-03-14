@@ -1,9 +1,6 @@
 import { setTimeout as wait } from "node:timers/promises";
 import { loadConfig } from "../../cli/config.js";
-import {
-  logging,
-  sanitizeOperationalLogMessage,
-} from "../../infra/logging/index.js";
+import { logging } from "../../infra/logging/index.js";
 import { assertGhReady } from "../../review/github.js";
 import {
   ReviewJobStore,
@@ -39,9 +36,6 @@ const JOB_STALE_RUNNING_MS = Math.max(
   resolvePositiveInt(process.env.REVIEWFLUX_JOB_STALE_RUNNING_MS, 5 * 60_000),
   5_000,
 );
-const DAEMON_WORKER_DRAIN_FAILED_ERROR = "daemon_worker_drain_failed";
-const DAEMON_POLL_FAILED_ERROR = "daemon_poll_failed";
-
 type DaemonCycleCoordinator = Pick<ReviewPollCoordinator, "pollProject">;
 type DaemonCycleWorker = Pick<ReviewJobWorker, "drain" | "recoverStaleRunningJobs">;
 type DaemonSemanticEvent =
@@ -140,12 +134,7 @@ export async function runDaemonCycle(params: {
       type: "queue",
       level: "error",
       message: "Review worker drain failed",
-      context: {
-        errorMessage: sanitizeOperationalLogMessage(
-          errorMessage,
-          DAEMON_WORKER_DRAIN_FAILED_ERROR,
-        ),
-      },
+      context: { errorMessage },
     });
   }
 
@@ -163,10 +152,7 @@ export async function runDaemonCycle(params: {
         message: "Project polling failed",
         context: {
           repo: project.repo,
-          errorMessage: sanitizeOperationalLogMessage(
-            errorMessage,
-            DAEMON_POLL_FAILED_ERROR,
-          ),
+          errorMessage,
         },
       });
     }
@@ -183,12 +169,7 @@ export async function runDaemonCycle(params: {
       type: "queue",
       level: "error",
       message: "Review worker drain failed",
-      context: {
-        errorMessage: sanitizeOperationalLogMessage(
-          errorMessage,
-          DAEMON_WORKER_DRAIN_FAILED_ERROR,
-        ),
-      },
+      context: { errorMessage },
     });
   }
 }
