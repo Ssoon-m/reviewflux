@@ -98,6 +98,22 @@ function resolveErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function isAbortWaitError(error: unknown, signal: AbortSignal): boolean {
+  if (!signal.aborted) {
+    return false;
+  }
+
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  return (
+    error.name === "AbortError"
+    || error.message === "aborted"
+    || ("code" in error && error.code === "ABORT_ERR")
+  );
+}
+
 function logRecoveredJobs(recoveredJobs: number): void {
   if (recoveredJobs > 0) {
     console.log(`[reviewflux] recovered ${recoveredJobs} stale review job(s)`);
@@ -332,8 +348,12 @@ export async function runDaemonStartCommand(
         await waitForNextPoll(POLL_INTERVAL_MS, undefined, {
           signal: abortController.signal,
         });
-      } catch {
-        break;
+      } catch (error) {
+        if (isAbortWaitError(error, abortController.signal)) {
+          break;
+        }
+
+        throw error;
       }
     }
   } finally {

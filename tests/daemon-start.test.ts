@@ -511,6 +511,67 @@ describe("daemon start cycle", () => {
     }
   });
 
+  it("rethrows non-abort wait failures instead of silently stopping", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-14T12:15:00.000Z"));
+
+    const home = makeTempHome();
+    homes.push(home);
+    process.env.HOME = home;
+
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const signalHandlers = new Map<string, () => void>();
+    const unregisterCalls: string[] = [];
+
+    try {
+      await expect(
+        runDaemonStartCommand({
+          loadConfig: () => makeConfig({
+            alpha: {
+              repo: "a/repo",
+              pr: { mode: "on_push", forceCommand: "@reviewflux" },
+              modelAlias: "gpt-5.4",
+              context: { mode: "default" },
+            },
+          }),
+          assertGhReady: vi.fn(async () => {}),
+          registerSignalHandler: (signal, listener) => {
+            signalHandlers.set(signal, listener);
+            return () => {
+              unregisterCalls.push(signal);
+              signalHandlers.delete(signal);
+            };
+          },
+          runCycle: vi.fn(async () => {}),
+          wait: vi.fn(async () => {
+            throw new Error("timer exploded");
+          }),
+        }),
+      ).rejects.toThrow("timer exploded");
+
+      expect(unregisterCalls).toEqual(["SIGINT", "SIGTERM"]);
+      expect(signalHandlers.size).toBe(0);
+      expect(logSpy.mock.calls.map(([message]) => message)).toEqual([
+        "[reviewflux] daemon start",
+        "[reviewflux] gh polling mode enabled (30000ms)",
+        "[reviewflux] tracking 1 project(s)",
+        "- a/repo | mode=on_push | model=gpt-5.4 | context=default:AGENTS.md",
+        "[reviewflux] force command is always enabled: @reviewflux",
+        `[reviewflux] queue database: ${reviewQueuePath(home)}`,
+        "\n[reviewflux] daemon stopped",
+      ]);
+
+      const daemonLog = readDaemonLog(home, "2026-03-14");
+      expect(daemonLog.map((entry) => entry.event)).toEqual([
+        "daemon_projects_loaded",
+        "daemon_started",
+        "daemon_stopped",
+      ]);
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
+
   it("waits for in-flight cycle work before logging daemon stopped on signal", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-03-14T12:30:00.000Z"));
