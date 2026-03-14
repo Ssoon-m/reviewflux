@@ -269,12 +269,14 @@ export async function runDaemonStartCommand(
   });
   const abortController = new AbortController();
   const unregisterSignalHandlers: Array<() => void> = [];
+  let didLogStop = false;
 
-  const shutdown = () => {
-    if (abortController.signal.aborted) {
+  const logDaemonStopped = () => {
+    if (didLogStop) {
       return;
     }
-    abortController.abort();
+
+    didLogStop = true;
     console.log("\n[reviewflux] daemon stopped");
     logDaemonEvent({
       event: "daemon_stopped",
@@ -282,6 +284,14 @@ export async function runDaemonStartCommand(
       level: "info",
       message: "Daemon stopped",
     });
+  };
+
+  const shutdown = () => {
+    if (abortController.signal.aborted) {
+      return;
+    }
+    abortController.abort();
+    logDaemonStopped();
   };
 
   for (const signal of ["SIGINT", "SIGTERM"] as const) {
@@ -304,6 +314,7 @@ export async function runDaemonStartCommand(
       }
     }
   } finally {
+    logDaemonStopped();
     for (const unregister of unregisterSignalHandlers) {
       unregister();
     }

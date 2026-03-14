@@ -401,4 +401,69 @@ describe("daemon start cycle", () => {
       logSpy.mockRestore();
     }
   });
+
+  it("writes daemon stopped when the loop exits without a signal handler", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-14T12:00:00.000Z"));
+
+    const home = makeTempHome();
+    homes.push(home);
+    process.env.HOME = home;
+
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const signalHandlers = new Map<string, () => void>();
+    const unregisterCalls: string[] = [];
+
+    try {
+      await expect(
+        runDaemonStartCommand({
+          loadConfig: () => makeConfig({
+            alpha: {
+              repo: "a/repo",
+              pr: { mode: "on_push", forceCommand: "@reviewflux" },
+              modelAlias: "gpt-5.4",
+              context: { mode: "default" },
+            },
+          }),
+          assertGhReady: vi.fn(async () => {}),
+          registerSignalHandler: (signal, listener) => {
+            signalHandlers.set(signal, listener);
+            return () => {
+              unregisterCalls.push(signal);
+              signalHandlers.delete(signal);
+            };
+          },
+          runCycle: vi.fn(async () => {
+            throw new Error("cycle boom");
+          }),
+        }),
+      ).rejects.toThrow("cycle boom");
+
+      expect(logSpy.mock.calls.map(([message]) => message)).toEqual([
+        "[reviewflux] daemon start",
+        "[reviewflux] gh polling mode enabled (30000ms)",
+        "[reviewflux] tracking 1 project(s)",
+        "- a/repo | mode=on_push | model=gpt-5.4 | context=default:AGENTS.md",
+        "[reviewflux] force command is always enabled: @reviewflux",
+        `[reviewflux] queue database: ${reviewQueuePath(home)}`,
+        "\n[reviewflux] daemon stopped",
+      ]);
+      expect(unregisterCalls).toEqual(["SIGINT", "SIGTERM"]);
+      expect(signalHandlers.size).toBe(0);
+
+      const daemonLog = readDaemonLog(home, "2026-03-14");
+      expect(daemonLog[daemonLog.length - 1]).toEqual({
+        ts: "2026-03-14T12:00:00.000Z",
+        date: "2026-03-14",
+        surface: "daemon",
+        type: "lifecycle",
+        level: "info",
+        event: "daemon_stopped",
+        message: "Daemon stopped",
+        context: {},
+      });
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
 });
