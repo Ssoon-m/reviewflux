@@ -9,7 +9,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 type FsModule = typeof import("node:fs");
@@ -50,8 +50,20 @@ function getLogsDir(home: string): string {
   return join(home, ".reviewflux", "logs");
 }
 
+function getLogDayDir(home: string, date: string): string {
+  return join(getLogsDir(home), date);
+}
+
 function getLogPath(home: string, surface: LoggingSurface, date: string): string {
-  return join(getLogsDir(home), `${surface}-${date}.jsonl`);
+  return join(getLogDayDir(home, date), `${surface}.jsonl`);
+}
+
+function writeSeedLog(path: string, contents: string): void {
+  const dir = dirname(path);
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  chmodSync(dir, 0o700);
+  writeFileSync(path, contents, { encoding: "utf8", mode: 0o600 });
+  chmodSync(path, 0o600);
 }
 
 function readLogFile(path: string): {
@@ -249,7 +261,7 @@ describe("operational logging", () => {
     expect(lines[0]).not.toContain("stack trace");
   });
 
-  it("prunes only expired daily log files and retries on later days", async () => {
+  it("prunes only expired daily log directories and legacy flat files and retries on later days", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-03-15T08:00:00.000Z"));
 
@@ -265,22 +277,29 @@ describe("operational logging", () => {
     const expiredDaemonPath = getLogPath(home, "daemon", "2026-02-27");
     const boundaryPath = getLogPath(home, "setup", "2026-03-01");
     const recentPath = getLogPath(home, "queue-worker", "2026-03-10");
-    const malformedDatePath = join(logsDir, "setup-2026-02-30.jsonl");
+    const expiredLegacyPath = join(logsDir, "setup-2026-02-26.jsonl");
+    const recentLegacyPath = join(logsDir, "daemon-2026-03-10.jsonl");
+    const malformedDateDirPath = join(logsDir, "2026-02-30");
+    const malformedDatePath = join(malformedDateDirPath, "setup.jsonl");
+    const malformedLegacyPath = join(logsDir, "setup-2026-02-30.jsonl");
     const malformedSurfacePath = join(logsDir, "other-2026-02-01.jsonl");
-    const unrelatedPath = join(logsDir, "notes.txt");
+    const unrelatedDirPath = join(logsDir, "notes");
+    const unrelatedPath = join(unrelatedDirPath, "notes.txt");
 
-    for (const path of [
-      expiredSetupPath,
-      expiredDaemonPath,
-      boundaryPath,
-      recentPath,
-      malformedDatePath,
-      malformedSurfacePath,
-      unrelatedPath,
-    ]) {
-      writeFileSync(path, "seed\n", { encoding: "utf8", mode: 0o600 });
-      chmodSync(path, 0o600);
-    }
+    writeSeedLog(expiredSetupPath, "seed\n");
+    writeSeedLog(expiredDaemonPath, "seed\n");
+    writeSeedLog(boundaryPath, "seed\n");
+    writeSeedLog(recentPath, "seed\n");
+    writeSeedLog(malformedDatePath, "seed\n");
+    writeFileSync(expiredLegacyPath, "seed\n", { encoding: "utf8", mode: 0o600 });
+    chmodSync(expiredLegacyPath, 0o600);
+    writeFileSync(recentLegacyPath, "seed\n", { encoding: "utf8", mode: 0o600 });
+    chmodSync(recentLegacyPath, 0o600);
+    writeFileSync(malformedLegacyPath, "seed\n", { encoding: "utf8", mode: 0o600 });
+    chmodSync(malformedLegacyPath, 0o600);
+    writeFileSync(malformedSurfacePath, "seed\n", { encoding: "utf8", mode: 0o600 });
+    chmodSync(malformedSurfacePath, 0o600);
+    writeSeedLog(unrelatedPath, "seed\n");
 
     const { logging } = await loadLoggingModule();
     logging({
@@ -293,15 +312,19 @@ describe("operational logging", () => {
 
     expect(existsSync(expiredSetupPath)).toBe(false);
     expect(existsSync(expiredDaemonPath)).toBe(false);
+    expect(existsSync(expiredLegacyPath)).toBe(false);
     expect(existsSync(boundaryPath)).toBe(true);
     expect(existsSync(recentPath)).toBe(true);
+    expect(existsSync(recentLegacyPath)).toBe(true);
+    expect(existsSync(malformedDateDirPath)).toBe(true);
     expect(existsSync(malformedDatePath)).toBe(true);
+    expect(existsSync(malformedLegacyPath)).toBe(true);
     expect(existsSync(malformedSurfacePath)).toBe(true);
+    expect(existsSync(unrelatedDirPath)).toBe(true);
     expect(existsSync(unrelatedPath)).toBe(true);
 
     const lateExpiredPath = getLogPath(home, "daemon", "2026-02-20");
-    writeFileSync(lateExpiredPath, "late\n", { encoding: "utf8", mode: 0o600 });
-    chmodSync(lateExpiredPath, 0o600);
+    writeSeedLog(lateExpiredPath, "late\n");
 
     logging({
       surface: "daemon",
@@ -324,8 +347,12 @@ describe("operational logging", () => {
     });
 
     expect(existsSync(lateExpiredPath)).toBe(false);
+    expect(existsSync(getLogDayDir(home, "2026-02-20"))).toBe(false);
+    expect(existsSync(malformedDateDirPath)).toBe(true);
     expect(existsSync(malformedDatePath)).toBe(true);
+    expect(existsSync(malformedLegacyPath)).toBe(true);
     expect(existsSync(malformedSurfacePath)).toBe(true);
+    expect(existsSync(unrelatedDirPath)).toBe(true);
     expect(existsSync(unrelatedPath)).toBe(true);
   });
 
@@ -347,9 +374,11 @@ describe("operational logging", () => {
     });
 
     const logsDir = getLogsDir(home);
+    const logDayDir = getLogDayDir(home, "2026-03-16");
     const logPath = getLogPath(home, "review-runtime", "2026-03-16");
 
     expect(statSync(logsDir).mode & 0o777).toBe(0o700);
+    expect(statSync(logDayDir).mode & 0o777).toBe(0o700);
     expect(statSync(logPath).mode & 0o777).toBe(0o600);
   });
 

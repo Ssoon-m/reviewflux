@@ -1,4 +1,4 @@
-import { appendFileSync, chmodSync, readdirSync, rmSync } from "node:fs";
+import { appendFileSync, chmodSync, mkdirSync, readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { ensureReviewFluxLogsDir } from "../../config/reviewflux-home.js";
 
@@ -50,9 +50,10 @@ const LOGGING_CONTEXT_KEYS = [
 
 const LOG_RETENTION_DAYS = 14;
 const DAY_IN_MS = 24 * 60 * 60 * 1000;
-const LOG_FILE_NAME_PATTERN = new RegExp(
+const LEGACY_LOG_FILE_NAME_PATTERN = new RegExp(
   `^(${LOGGING_SURFACES.join("|")})-(\\d{4}-\\d{2}-\\d{2})\\.jsonl$`,
 );
+const LOG_DAY_DIRECTORY_PATTERN = /^(\d{4}-\d{2}-\d{2})$/;
 
 let lastPrunedDate: string | null = null;
 
@@ -131,7 +132,7 @@ function pruneExpiredLogs(logsDir: string, currentDate: string): void {
 
   lastPrunedDate = currentDate;
 
-  let entries: Array<{ isFile(): boolean; name: string }>;
+  let entries: Array<{ isDirectory(): boolean; isFile(): boolean; name: string }>;
   try {
     entries = readdirSync(logsDir, { withFileTypes: true });
   } catch {
@@ -139,27 +140,49 @@ function pruneExpiredLogs(logsDir: string, currentDate: string): void {
   }
 
   for (const entry of entries) {
-    if (!entry.isFile()) {
+    if (entry.isFile()) {
+      const match = LEGACY_LOG_FILE_NAME_PATTERN.exec(entry.name);
+      if (!match) {
+        continue;
+      }
+
+      const [, , fileDate] = match;
+      const fileDateTime = parseUtcDate(fileDate);
+      if (fileDateTime === null) {
+        continue;
+      }
+
+      if (currentDateTime - fileDateTime <= LOG_RETENTION_DAYS * DAY_IN_MS) {
+        continue;
+      }
+
+      try {
+        rmSync(join(logsDir, entry.name), { force: true });
+      } catch {}
       continue;
     }
 
-    const match = LOG_FILE_NAME_PATTERN.exec(entry.name);
+    if (!entry.isDirectory()) {
+      continue;
+    }
+
+    const match = LOG_DAY_DIRECTORY_PATTERN.exec(entry.name);
     if (!match) {
       continue;
     }
 
-    const [, , fileDate] = match;
-    const fileDateTime = parseUtcDate(fileDate);
-    if (fileDateTime === null) {
+    const [, directoryDate] = match;
+    const directoryDateTime = parseUtcDate(directoryDate);
+    if (directoryDateTime === null) {
       continue;
     }
 
-    if (currentDateTime - fileDateTime <= LOG_RETENTION_DAYS * DAY_IN_MS) {
+    if (currentDateTime - directoryDateTime <= LOG_RETENTION_DAYS * DAY_IN_MS) {
       continue;
     }
 
     try {
-      rmSync(join(logsDir, entry.name), { force: true });
+      rmSync(join(logsDir, entry.name), { force: true, recursive: true });
     } catch {}
   }
 }
@@ -204,6 +227,17 @@ function setLogFileMode(path: string): void {
   } catch {}
 }
 
+function ensureLogDayDir(logsDir: string, date: string): string | null {
+  const path = join(logsDir, date);
+  try {
+    mkdirSync(path, { recursive: true, mode: 0o700 });
+    chmodSync(path, 0o700);
+    return path;
+  } catch {
+    return null;
+  }
+}
+
 export function logging(input: LoggingInput): void {
   const ts = new Date().toISOString();
   const date = ts.slice(0, 10);
@@ -229,7 +263,12 @@ export function logging(input: LoggingInput): void {
 
   pruneExpiredLogs(logsDir, date);
 
-  const path = join(logsDir, `${input.surface}-${date}.jsonl`);
+  const logDayDir = ensureLogDayDir(logsDir, date);
+  if (logDayDir === null) {
+    return;
+  }
+
+  const path = join(logDayDir, `${input.surface}.jsonl`);
   if (!appendRecord(path, `${serialized}\n`)) {
     return;
   }
