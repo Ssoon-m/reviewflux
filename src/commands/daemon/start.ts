@@ -201,7 +201,7 @@ export async function runDaemonStartCommand(
   const registerSignalHandler =
     collaborators.registerSignalHandler
     ?? ((signal: "SIGINT" | "SIGTERM", listener: () => void) => {
-      process.on(signal, listener);
+      process.once(signal, listener);
       return () => {
         process.off(signal, listener);
       };
