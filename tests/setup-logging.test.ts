@@ -64,7 +64,7 @@ function reviewFluxHome(home: string): string {
 }
 
 function setupLogPath(home: string, date: string): string {
-  return join(reviewFluxHome(home), "logs", `setup-${date}.jsonl`);
+  return join(reviewFluxHome(home), "logs", date, "setup.jsonl");
 }
 
 function readSetupLog(home: string, date: string): {

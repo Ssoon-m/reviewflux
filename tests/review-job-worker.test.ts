@@ -33,7 +33,7 @@ function makeTempHome(): string {
 }
 
 function getWorkerLogPath(home: string, date: string): string {
-  return join(home, ".reviewflux", "logs", `queue-worker-${date}.jsonl`);
+  return join(home, ".reviewflux", "logs", date, "queue-worker.jsonl");
 }
 
 function readWorkerLogs(home: string, date: string): {

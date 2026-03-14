@@ -37,7 +37,8 @@ function getReviewRuntimeLogPath(currentHome: string): string {
     currentHome,
     ".reviewflux",
     "logs",
-    `review-runtime-${REVIEW_RUNTIME_LOG_DATE}.jsonl`,
+    REVIEW_RUNTIME_LOG_DATE,
+    "review-runtime.jsonl",
   );
 }
 

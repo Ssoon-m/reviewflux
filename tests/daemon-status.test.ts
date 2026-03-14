@@ -25,7 +25,7 @@ function makeTempHome(): string {
 }
 
 function getDaemonLogPath(home: string, date: string): string {
-  return join(home, ".reviewflux", "logs", `daemon-${date}.jsonl`);
+  return join(home, ".reviewflux", "logs", date, "daemon.jsonl");
 }
 
 function readDaemonLog(home: string, date: string): DaemonLogRecord[] {
