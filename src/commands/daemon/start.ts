@@ -68,7 +68,7 @@ type DaemonEventLogger = (entry: {
 type RegisterSignalHandler = (
   signal: "SIGINT" | "SIGTERM",
   listener: () => void,
-) => void;
+) => (() => void) | undefined;
 type DaemonStartCollaborators = {
   loadConfig?: typeof loadConfig;
   assertGhReady?: typeof assertGhReady;
@@ -228,6 +228,9 @@ export async function runDaemonStartCommand(
     collaborators.registerSignalHandler
     ?? ((signal: "SIGINT" | "SIGTERM", listener: () => void) => {
       process.once(signal, listener);
+      return () => {
+        process.off(signal, listener);
+      };
     });
   const runCycle = collaborators.runCycle ?? runDaemonCycle;
   const logDaemonEvent = createDaemonEventLogger(collaborators.logging ?? logging);
@@ -309,6 +312,7 @@ export async function runDaemonStartCommand(
     staleRunningMs: JOB_STALE_RUNNING_MS,
   });
   const abortController = new AbortController();
+  const unregisterSignalHandlers: Array<() => void> = [];
 
   const shutdown = () => {
     if (abortController.signal.aborted) {
@@ -324,8 +328,12 @@ export async function runDaemonStartCommand(
     });
   };
 
-  registerSignalHandler("SIGINT", shutdown);
-  registerSignalHandler("SIGTERM", shutdown);
+  for (const signal of ["SIGINT", "SIGTERM"] as const) {
+    const unregister = registerSignalHandler(signal, shutdown);
+    if (typeof unregister === "function") {
+      unregisterSignalHandlers.push(unregister);
+    }
+  }
 
   try {
     while (!abortController.signal.aborted) {
@@ -340,6 +348,9 @@ export async function runDaemonStartCommand(
       }
     }
   } finally {
+    for (const unregister of unregisterSignalHandlers) {
+      unregister();
+    }
     database.close();
   }
 }

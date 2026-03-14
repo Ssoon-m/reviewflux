@@ -255,6 +255,7 @@ describe("daemon start cycle", () => {
 
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     const signalHandlers = new Map<string, () => void>();
+    const unregisterCalls: string[] = [];
 
     try {
       await runDaemonStartCommand({
@@ -269,6 +270,10 @@ describe("daemon start cycle", () => {
         assertGhReady: vi.fn(async () => {}),
         registerSignalHandler: (signal, listener) => {
           signalHandlers.set(signal, listener);
+          return () => {
+            unregisterCalls.push(signal);
+            signalHandlers.delete(signal);
+          };
         },
         runCycle: vi.fn(async () => {}),
         wait: vi.fn(async () => {
@@ -286,6 +291,8 @@ describe("daemon start cycle", () => {
         `[reviewflux] queue database: ${reviewQueuePath(home)}`,
         "\n[reviewflux] daemon stopped",
       ]);
+      expect(unregisterCalls).toEqual(["SIGINT", "SIGTERM"]);
+      expect(signalHandlers.size).toBe(0);
 
       expect(readDaemonLog(home, "2026-03-14")).toEqual([
         {
