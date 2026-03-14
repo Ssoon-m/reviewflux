@@ -301,8 +301,8 @@ describe("daemon start cycle", () => {
           surface: "daemon",
           type: "lifecycle",
           level: "info",
-          event: "daemon_started",
-          message: "Daemon start requested",
+          event: "daemon_projects_loaded",
+          message: "Daemon projects loaded",
           context: {
             projectCount: 1,
             pollIntervalMs: 30000,
@@ -317,8 +317,8 @@ describe("daemon start cycle", () => {
           surface: "daemon",
           type: "lifecycle",
           level: "info",
-          event: "daemon_projects_loaded",
-          message: "Daemon projects loaded",
+          event: "daemon_started",
+          message: "Daemon started",
           context: {
             projectCount: 1,
             pollIntervalMs: 30000,
@@ -376,27 +376,47 @@ describe("daemon start cycle", () => {
           surface: "daemon",
           type: "lifecycle",
           level: "info",
-          event: "daemon_started",
-          message: "Daemon start requested",
-          context: {
-            projectCount: 0,
-            pollIntervalMs: 30000,
-            retryDelayMs: 30000,
-            maxAttempts: 1,
-            staleRunningMs: 300000,
-          },
-        },
-        {
-          ts: "2026-03-14T11:00:00.000Z",
-          date: "2026-03-14",
-          surface: "daemon",
-          type: "lifecycle",
-          level: "info",
           event: "daemon_no_projects",
           message: "No projects configured for daemon",
           context: { projectCount: 0 },
         },
       ]);
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
+
+  it("does not write daemon_started when gh auth readiness fails", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-14T11:30:00.000Z"));
+
+    const home = makeTempHome();
+    homes.push(home);
+    process.env.HOME = home;
+
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    try {
+      await expect(
+        runDaemonStartCommand({
+          loadConfig: () => makeConfig({
+            alpha: {
+              repo: "a/repo",
+              pr: { mode: "on_push", forceCommand: "@reviewflux" },
+              modelAlias: "gpt-5.4",
+              context: { mode: "default" },
+            },
+          }),
+          assertGhReady: vi.fn(async () => {
+            throw new Error("gh not ready");
+          }),
+        }),
+      ).rejects.toThrow("gh not ready");
+
+      expect(logSpy.mock.calls.map(([message]) => message)).toEqual([
+        "[reviewflux] daemon start",
+      ]);
+      expect(() => readDaemonLog(home, "2026-03-14")).toThrow(/ENOENT/);
     } finally {
       logSpy.mockRestore();
     }

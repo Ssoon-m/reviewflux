@@ -197,20 +197,6 @@ export async function runDaemonStartCommand(
 
   console.log("[reviewflux] daemon start");
 
-  logDaemonEvent({
-    event: "daemon_started",
-    type: "lifecycle",
-    level: "info",
-    message: "Daemon start requested",
-    context: {
-      projectCount: projects.length,
-      pollIntervalMs: POLL_INTERVAL_MS,
-      retryDelayMs: JOB_RETRY_DELAY_MS,
-      maxAttempts: JOB_MAX_ATTEMPTS,
-      staleRunningMs: JOB_STALE_RUNNING_MS,
-    },
-  });
-
   if (projects.length === 0) {
     console.log(
       "[reviewflux] no projects configured. run: reviewflux project add",
@@ -300,6 +286,20 @@ export async function runDaemonStartCommand(
       unregisterSignalHandlers.push(unregister);
     }
   }
+
+  logDaemonEvent({
+    event: "daemon_started",
+    type: "lifecycle",
+    level: "info",
+    message: "Daemon started",
+    context: {
+      projectCount: projects.length,
+      pollIntervalMs: POLL_INTERVAL_MS,
+      retryDelayMs: JOB_RETRY_DELAY_MS,
+      maxAttempts: JOB_MAX_ATTEMPTS,
+      staleRunningMs: JOB_STALE_RUNNING_MS,
+    },
+  });
 
   try {
     while (!abortController.signal.aborted) {
