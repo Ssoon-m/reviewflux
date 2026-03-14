@@ -40,6 +40,7 @@ type LoggingRecord = {
 };
 type LoggingModule = {
   logging: (input: LoggingInput) => void;
+  sanitizeOperationalLogMessage: (message: string, fallback: string) => string;
 };
 
 function makeTempHome(): string {
@@ -259,6 +260,20 @@ describe("operational logging", () => {
     expect(records[0]?.context).not.toHaveProperty("details");
     expect(lines[0]).not.toContain("should-drop");
     expect(lines[0]).not.toContain("stack trace");
+  });
+
+  it("sanitizes secret-bearing free-form log messages", async () => {
+    const { sanitizeOperationalLogMessage } = await loadLoggingModule();
+
+    expect(
+      sanitizeOperationalLogMessage(
+        "oauth failed code=abc123 state: xyz987 bearer token123 access_token=secret sk-live-token ghp_secret_token",
+        "fallback",
+      ),
+    ).toBe(
+      "oauth failed code=[redacted] state=[redacted] bearer [redacted] access_token=[redacted] [redacted] [redacted]",
+    );
+    expect(sanitizeOperationalLogMessage("   ", "fallback")).toBe("fallback");
   });
 
   it("prunes only expired daily log directories and legacy flat files and retries on later days", async () => {

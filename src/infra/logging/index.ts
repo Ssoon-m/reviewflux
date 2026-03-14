@@ -83,6 +83,40 @@ export type LoggingRecord = {
   context: LoggingContext;
 };
 
+export function sanitizeOperationalLogMessage(
+  message: string,
+  fallback: string,
+): string {
+  const raw = message
+    .split(/\r?\n/, 1)[0]
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!raw) {
+    return fallback;
+  }
+
+  const sanitized = raw
+    .replace(
+      /([?&](?:access_token|refresh_token|client_secret|api_key|token|code|state)=)[^&\s]+/gi,
+      "$1[redacted]",
+    )
+    .replace(/\bbearer\s+[^\s,;]+/gi, "bearer [redacted]")
+    .replace(
+      /\b(access[_-]?token|refresh[_-]?token|client[_-]?secret|api[_-]?key|secret|token|authorization|code|state)\s*[:=]\s*[^\s,;]+/gi,
+      "$1=[redacted]",
+    )
+    .replace(/\bsk-[A-Za-z0-9_-]+\b/g, "[redacted]")
+    .replace(/\bgh[pousr]_[A-Za-z0-9_]+\b/gi, "[redacted]")
+    .trim();
+
+  if (!sanitized) {
+    return fallback;
+  }
+
+  return sanitized.slice(0, 160);
+}
+
 function isLoggingContextValue(value: unknown): value is LoggingContextValue {
   return (
     typeof value === "string"
