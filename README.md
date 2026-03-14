@@ -21,6 +21,12 @@ When the daemon receives many events at once, each review can take time because 
 > ⚠️ This project is currently a work in progress (WIP).
 > Features and command behavior may change.
 
+## Requirements
+
+- Node.js `20.x` or `22+`
+- `pnpm@10.30.3`
+- A local C/C++ build toolchain when `better-sqlite3` cannot use a matching prebuilt binary during `pnpm install`
+
 ## Quick Start
 
 ```bash

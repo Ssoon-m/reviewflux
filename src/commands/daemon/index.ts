@@ -3,21 +3,42 @@ import {
   resolveCommandBuilderDependencies,
   type CommandBuilderDependencies,
 } from "../../cli/command-builder.js";
-import { runDaemonInstallCommand } from "./install.js";
-import { runDaemonStartCommand } from "./start.js";
-import { runDaemonStatusCommand } from "./status.js";
-import { runDaemonStopCommand } from "./stop.js";
+
+type RunDaemonStartCommand = (typeof import("./start.js"))["runDaemonStartCommand"];
+type RunDaemonStopCommand = (typeof import("./stop.js"))["runDaemonStopCommand"];
+type RunDaemonStatusCommand = (typeof import("./status.js"))["runDaemonStatusCommand"];
+type RunDaemonInstallCommand = (typeof import("./install.js"))["runDaemonInstallCommand"];
 
 export type DaemonCommandHandlers = {
-  runDaemonStartCommand: typeof runDaemonStartCommand;
-  runDaemonStopCommand: typeof runDaemonStopCommand;
-  runDaemonStatusCommand: typeof runDaemonStatusCommand;
-  runDaemonInstallCommand: typeof runDaemonInstallCommand;
+  runDaemonStartCommand: RunDaemonStartCommand;
+  runDaemonStopCommand: RunDaemonStopCommand;
+  runDaemonStatusCommand: RunDaemonStatusCommand;
+  runDaemonInstallCommand: RunDaemonInstallCommand;
 };
 
 export type DaemonCommandDependencies = CommandBuilderDependencies<
   DaemonCommandHandlers
 >;
+
+export const runDaemonStartCommand: RunDaemonStartCommand = async (...args) => {
+  const module = await import("./start.js");
+  await module.runDaemonStartCommand(...args);
+};
+
+export const runDaemonStopCommand: RunDaemonStopCommand = async (...args) => {
+  const module = await import("./stop.js");
+  await module.runDaemonStopCommand(...args);
+};
+
+export const runDaemonStatusCommand: RunDaemonStatusCommand = async (...args) => {
+  const module = await import("./status.js");
+  await module.runDaemonStatusCommand(...args);
+};
+
+export const runDaemonInstallCommand: RunDaemonInstallCommand = async (...args) => {
+  const module = await import("./install.js");
+  await module.runDaemonInstallCommand(...args);
+};
 
 const defaultDaemonCommandHandlers: DaemonCommandHandlers = {
   runDaemonStartCommand,
@@ -57,10 +78,3 @@ export function buildDaemonCommand(
 
   return program;
 }
-
-export {
-  runDaemonStartCommand,
-  runDaemonStopCommand,
-  runDaemonStatusCommand,
-  runDaemonInstallCommand,
-};

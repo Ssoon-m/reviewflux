@@ -32,7 +32,7 @@ describe("review publisher", () => {
     expect(result).toEqual({
       attemptedInlineCount: 0,
       postedInlineCount: 0,
-      postedSummaryFallback: true,
+      postedTopLevelFallback: true,
     });
     expect(adapter.listChangedPaths).not.toHaveBeenCalled();
     expect(adapter.postInlineComment).not.toHaveBeenCalled();
@@ -84,7 +84,7 @@ describe("review publisher", () => {
     expect(result).toEqual({
       attemptedInlineCount: 0,
       postedInlineCount: 0,
-      postedSummaryFallback: true,
+      postedTopLevelFallback: true,
     });
     expect(postSummaryComment.mock.calls[0]?.[1].startsWith("🧠 ReviewFlux Review\n\n")).toBe(true);
     expect(postSummaryComment.mock.calls[0]?.[1]).toContain(
@@ -157,7 +157,7 @@ describe("review publisher", () => {
     expect(result).toEqual({
       attemptedInlineCount: 1,
       postedInlineCount: 1,
-      postedSummaryFallback: true,
+      postedTopLevelFallback: true,
     });
     expect(postInlineComment).toHaveBeenCalledTimes(1);
     expect(postInlineComment).toHaveBeenCalledWith(context, {
@@ -205,7 +205,7 @@ describe("review publisher", () => {
     expect(result).toEqual({
       attemptedInlineCount: 1,
       postedInlineCount: 1,
-      postedSummaryFallback: true,
+      postedTopLevelFallback: true,
     });
     expect(postInlineComment).toHaveBeenCalledTimes(1);
     expect(postSummaryComment.mock.calls[0]?.[1].startsWith("🧠 ReviewFlux Review\n\n")).toBe(true);
@@ -216,7 +216,7 @@ describe("review publisher", () => {
     expect(postSummaryComment.mock.calls[0]?.[1]).not.toContain("src/a.ts:12");
   });
 
-  it("can also post the original body after inline comments when enabled", async () => {
+  it("does not post a top-level comment when inline comments fully succeed", async () => {
     const context = makeContext([
       {
         path: "src/a.ts",
@@ -240,20 +240,14 @@ describe("review publisher", () => {
     const result = await publishReviewWithInlineComments({
       context,
       adapter,
-      postSummaryWhenInlinePosted: true,
     });
 
     expect(result).toEqual({
       attemptedInlineCount: 1,
       postedInlineCount: 1,
-      postedSummaryFallback: false,
+      postedTopLevelFallback: false,
     });
-    expect(postSummaryComment).toHaveBeenCalledTimes(1);
-    expect(postSummaryComment.mock.calls[0]?.[1].startsWith("🧠 ReviewFlux Review\n\n")).toBe(true);
-    expect(postSummaryComment.mock.calls[0]?.[1]).toContain(
-      "- Detail: null guard missing",
-    );
-    expect(postSummaryComment.mock.calls[0]?.[1]).not.toContain("src/a.ts:12");
+    expect(postSummaryComment).not.toHaveBeenCalled();
   });
 
   it("falls back to summary when inline comments all fail", async () => {
@@ -282,7 +276,7 @@ describe("review publisher", () => {
     expect(result).toEqual({
       attemptedInlineCount: 1,
       postedInlineCount: 0,
-      postedSummaryFallback: true,
+      postedTopLevelFallback: true,
     });
     expect(postInlineComment).toHaveBeenCalledTimes(1);
     expect(postSummaryComment.mock.calls[0]?.[1].startsWith("🧠 ReviewFlux Review\n\n")).toBe(true);
@@ -320,7 +314,7 @@ describe("review publisher", () => {
     expect(result).toEqual({
       attemptedInlineCount: 0,
       postedInlineCount: 0,
-      postedSummaryFallback: true,
+      postedTopLevelFallback: true,
     });
     expect(postSummaryComment.mock.calls[0]?.[1].startsWith("🧠 ReviewFlux Review\n\n")).toBe(true);
     expect(postSummaryComment.mock.calls[0]?.[1]).toContain(
@@ -355,7 +349,7 @@ describe("review publisher", () => {
           body: detailedBody,
         },
       ]),
-      preferTopLevelCommentOnly: true,
+      deliveryMode: "top-level-only",
     } satisfies PublishReviewContext;
 
     const postSummaryComment = vi
@@ -372,7 +366,7 @@ describe("review publisher", () => {
     expect(result).toEqual({
       attemptedInlineCount: 0,
       postedInlineCount: 0,
-      postedSummaryFallback: true,
+      postedTopLevelFallback: true,
     });
     expect(adapter.listChangedPaths).not.toHaveBeenCalled();
     expect(adapter.postInlineComment).not.toHaveBeenCalled();

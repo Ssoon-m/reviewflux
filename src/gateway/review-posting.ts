@@ -1,6 +1,7 @@
 import {
   publishReviewWithInlineComments,
   type InlineReviewComment,
+  type ReviewDeliveryMode,
   type PublishReviewContext,
   type ReviewFinding,
   type ReviewPublisherAdapter,
@@ -80,8 +81,7 @@ export async function postReviewOutput(params: {
   prNumber: number;
   prHeadSha: string;
   findings?: ReviewFinding[];
-  preferTopLevelCommentOnly?: boolean;
-  postSummaryWhenInlinePosted?: boolean;
+  deliveryMode?: ReviewDeliveryMode;
   diff: string;
   listPullRequestFiles: (
     repo: string,
@@ -105,7 +105,7 @@ export async function postReviewOutput(params: {
     repo: params.repo,
     prNumber: params.prNumber,
     findings: params.findings,
-    preferTopLevelCommentOnly: params.preferTopLevelCommentOnly,
+    deliveryMode: params.deliveryMode,
   };
 
   const adapter: ReviewPublisherAdapter = {
@@ -147,7 +147,6 @@ export async function postReviewOutput(params: {
     context,
     adapter,
     maxInlineComments: 20,
-    postSummaryWhenInlinePosted: params.postSummaryWhenInlinePosted,
     onInlineCommentError: (comment, error) => {
       console.error(
         `[reviewflux] failed to post inline comment: ${comment.path}:${comment.line}`,

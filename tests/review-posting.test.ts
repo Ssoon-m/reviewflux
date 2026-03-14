@@ -7,8 +7,7 @@ function makeParams(overrides: Partial<Parameters<typeof postReviewOutput>[0]> =
     prNumber: 42,
     prHeadSha: "abc123head",
     findings: [],
-    preferTopLevelCommentOnly: false,
-    postSummaryWhenInlinePosted: false,
+    deliveryMode: undefined,
     diff: "",
     listPullRequestFiles: vi.fn().mockResolvedValue([]),
     postSummaryComment: vi.fn().mockResolvedValue(undefined),
@@ -155,7 +154,7 @@ describe("review posting", () => {
     expect(postSummaryComment).not.toHaveBeenCalled();
   });
 
-  it("uses only top-level comments when preferTopLevelCommentOnly is enabled", async () => {
+  it("uses only top-level comments when deliveryMode is top-level-only", async () => {
     const listPullRequestFiles = vi
       .fn()
       .mockResolvedValue([{ filename: "src/a.ts" }]);
@@ -169,7 +168,7 @@ describe("review posting", () => {
           body: "### Summary\nTop-level only review",
         },
       ],
-      preferTopLevelCommentOnly: true,
+      deliveryMode: "top-level-only",
       diff: [
         "diff --git a/src/a.ts b/src/a.ts",
         "--- a/src/a.ts",
@@ -193,42 +192,4 @@ describe("review posting", () => {
     );
   });
 
-  it("can also post a follow-up summary after inline comments when enabled", async () => {
-    const listPullRequestFiles = vi
-      .fn()
-      .mockResolvedValue([{ filename: "src/a.ts" }]);
-    const postSummaryComment = vi.fn().mockResolvedValue(undefined);
-    const postInlineReviewComment = vi.fn().mockResolvedValue(undefined);
-    const params = makeParams({
-      findings: [
-        {
-          path: "src/a.ts",
-          line: 2,
-          body: "### Summary\nManual trigger finding",
-        },
-      ],
-      postSummaryWhenInlinePosted: true,
-      diff: [
-        "diff --git a/src/a.ts b/src/a.ts",
-        "--- a/src/a.ts",
-        "+++ b/src/a.ts",
-        "@@ -1,1 +1,2 @@",
-        " line one",
-        "+line two",
-      ].join("\n"),
-      listPullRequestFiles,
-      postSummaryComment,
-      postInlineReviewComment,
-    });
-
-    await postReviewOutput(params);
-
-    expect(postInlineReviewComment).toHaveBeenCalledTimes(1);
-    expect(postSummaryComment).toHaveBeenCalledTimes(1);
-    expect(postSummaryComment.mock.calls[0]?.[0]).toEqual({
-      repo: "ssoon-m/reviewflux",
-      prNumber: 42,
-      body: "🧠 ReviewFlux Review\n\n### Summary\nManual trigger finding",
-    });
-  });
 });

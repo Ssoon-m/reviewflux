@@ -178,7 +178,6 @@ describe("runReviewJob", () => {
         repo: "ssoon-m/reviewflux",
         prNumber: 7,
         prHeadSha: "headsha",
-        postSummaryWhenInlinePosted: true,
       }),
     );
     expect(mocks.postPullRequestCommentMock).not.toHaveBeenCalled();

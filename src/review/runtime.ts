@@ -463,7 +463,6 @@ export async function runReviewJob(params: {
         prNumber: params.prNumber,
         prHeadSha: pr.head.sha,
         findings: findingsToPost,
-        postSummaryWhenInlinePosted: params.reason === "manual_force",
         diff: review.diff,
         listPullRequestFiles,
         postSummaryComment: async ({ body }) => {
