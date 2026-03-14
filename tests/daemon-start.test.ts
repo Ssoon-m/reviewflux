@@ -26,7 +26,7 @@ function makeTempHome(): string {
 }
 
 function getDaemonLogPath(home: string, date: string): string {
-  return join(home, ".reviewflux", "logs", `daemon-${date}.jsonl`);
+  return join(home, ".reviewflux", "logs", date, "daemon.jsonl");
 }
 
 function readDaemonLog(home: string, date: string): DaemonLogRecord[] {
@@ -219,7 +219,9 @@ describe("daemon start cycle", () => {
           level: "error",
           event: "daemon_cycle_worker_drain_failed",
           message: "Review worker drain failed",
-          context: { errorMessage: "daemon_worker_drain_failed" },
+          context: {
+            errorMessage: "drain boom provider body access_token=[redacted]",
+          },
         },
         {
           ts: "2026-03-14T09:00:00.000Z",
@@ -229,7 +231,10 @@ describe("daemon start cycle", () => {
           level: "error",
           event: "daemon_cycle_poll_failed",
           message: "Project polling failed",
-          context: { repo: "b/repo", errorMessage: "daemon_poll_failed" },
+          context: {
+            repo: "b/repo",
+            errorMessage: "poll boom upstream response code=401 bearer [redacted]",
+          },
         },
       ]);
     } finally {
