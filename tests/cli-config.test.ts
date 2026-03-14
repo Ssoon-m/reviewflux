@@ -3,14 +3,19 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
-  getActiveAuthProfile,
   ensureReviewFluxHome,
+  getActiveAuthProfile,
   getAuthStorePath,
   getConfigPath,
   loadConfig,
-  saveConfig,
   type ReviewFluxConfig,
+  saveConfig,
 } from "../src/cli/config.js";
+import {
+  ensureReviewFluxLogsDir,
+  getReviewFluxHome,
+  getReviewFluxLogsDir,
+} from "../src/config/reviewflux-home.js";
 
 describe("cli-config", () => {
   it("saves and loads config under ~/.reviewflux", () => {
@@ -63,6 +68,24 @@ describe("cli-config", () => {
     const loaded = loadConfig(fakeHome);
     expect(loaded.oauth).toBeUndefined();
     expect(loaded.auth?.profiles?.["codex:default"]).toBeDefined();
+  });
+
+  it("builds ReviewFlux config and log paths from the raw user home once", () => {
+    const fakeHome = mkdtempSync(join(tmpdir(), "reviewflux-home-"));
+    const reviewFluxHome = ensureReviewFluxHome(fakeHome);
+    const logsDir = ensureReviewFluxLogsDir(fakeHome);
+
+    expect(reviewFluxHome).toBe(getReviewFluxHome(fakeHome));
+    expect(reviewFluxHome).toBe(join(fakeHome, ".reviewflux"));
+    expect(getConfigPath(fakeHome)).toBe(join(fakeHome, ".reviewflux", "config.json"));
+    expect(getAuthStorePath(fakeHome)).toBe(join(fakeHome, ".reviewflux", "auth.json"));
+    expect(logsDir).toBe(getReviewFluxLogsDir(fakeHome));
+    expect(logsDir).toBe(join(fakeHome, ".reviewflux", "logs"));
+    expect(existsSync(logsDir)).toBe(true);
+    expect(statSync(logsDir).mode & 0o777).toBe(0o700);
+    expect(getConfigPath(fakeHome)).not.toContain(join(".reviewflux", ".reviewflux"));
+    expect(getAuthStorePath(fakeHome)).not.toContain(join(".reviewflux", ".reviewflux"));
+    expect(logsDir).not.toContain(join(".reviewflux", ".reviewflux"));
   });
 
   it("resolves active auth profile by provider order", () => {

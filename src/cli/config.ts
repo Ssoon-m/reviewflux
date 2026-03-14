@@ -1,6 +1,8 @@
-import { chmodSync, existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { ensureReviewFluxHome, getReviewFluxPath } from "../config/reviewflux-home.js";
+
+export { ensureReviewFluxHome, getReviewFluxHome } from "../config/reviewflux-home.js";
 
 export type AuthMode = "oauth" | "apikey";
 
@@ -83,27 +85,12 @@ type AuthStoreFile = {
   oauth?: ReviewFluxConfig["oauth"];
   apiKey?: ReviewFluxConfig["apiKey"];
 };
-
-
-export function getReviewFluxHome(home: string = homedir()): string {
-  return join(home, ".reviewflux");
-}
-
 export function getConfigPath(home: string = homedir()): string {
-  return join(getReviewFluxHome(home), "config.json");
+  return getReviewFluxPath(home, "config.json");
 }
 
 export function getAuthStorePath(home: string = homedir()): string {
-  return join(getReviewFluxHome(home), "auth.json");
-}
-
-export function ensureReviewFluxHome(home: string = homedir()): string {
-  const dir = getReviewFluxHome(home);
-  if (!existsSync(dir)) {
-    mkdirSync(dir, { recursive: true, mode: 0o700 });
-  }
-  chmodSync(dir, 0o700);
-  return dir;
+  return getReviewFluxPath(home, "auth.json");
 }
 
 function writeConfigFile(path: string, config: Omit<ReviewFluxConfig, "auth" | "oauth" | "apiKey">): void {

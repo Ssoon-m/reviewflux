@@ -1,7 +1,8 @@
-import { createRequire } from "node:module";
 import { mkdirSync } from "node:fs";
+import { createRequire } from "node:module";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname } from "node:path";
+import { getReviewFluxPath } from "../../config/reviewflux-home.js";
 import { bootstrapReviewQueueSchema } from "./schema.js";
 
 type BetterSqlite3Module = typeof import("better-sqlite3");
@@ -15,7 +16,7 @@ export type ReviewQueueDatabaseOptions = {
 };
 
 export function reviewQueuePath(home: string = homedir()): string {
-  return join(home, ".reviewflux", "reviewflux.db");
+  return getReviewFluxPath(home, "reviewflux.db");
 }
 
 function resolveDatabasePath(options: ReviewQueueDatabaseOptions = {}): string {
