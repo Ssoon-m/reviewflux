@@ -150,8 +150,9 @@ describe("daemon start cycle", () => {
     const sensitivePollCode = "UPSTREAM_PROVIDER_401";
     const sensitiveDrainMessage =
       "drain boom provider body access_token=super-secret-token";
+    const sensitivePollState = "oauth-state-secret";
     const sensitivePollMessage =
-      "poll boom upstream response code=401 bearer super-secret-token";
+      `poll boom upstream response code=401 state=${sensitivePollState} bearer super-secret-token`;
 
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
@@ -199,6 +200,7 @@ describe("daemon start cycle", () => {
       expect(rawDaemonLog).not.toContain(sensitiveDrainCode);
       expect(rawDaemonLog).not.toContain(sensitivePollCode);
       expect(rawDaemonLog).not.toContain("super-secret-token");
+      expect(rawDaemonLog).not.toContain(sensitivePollState);
 
       expect(readDaemonLog(home, "2026-03-14")).toEqual([
         {
@@ -233,7 +235,7 @@ describe("daemon start cycle", () => {
           message: "Project polling failed",
           context: {
             repo: "b/repo",
-            errorMessage: "poll boom upstream response code=401 bearer [redacted]",
+            errorMessage: "poll boom upstream response code=[redacted] state=[redacted] bearer [redacted]",
           },
         },
       ]);

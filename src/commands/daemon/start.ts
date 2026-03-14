@@ -117,7 +117,7 @@ function sanitizeDaemonErrorMessage(error: unknown, fallback: string): string {
     )
     .replace(/\bbearer\s+[^\s,;]+/gi, "bearer [redacted]")
     .replace(
-      /\b(access[_-]?token|refresh[_-]?token|client[_-]?secret|api[_-]?key|secret|token|authorization)\s*[:=]\s*[^\s,;]+/gi,
+      /\b(access[_-]?token|refresh[_-]?token|client[_-]?secret|api[_-]?key|secret|token|authorization|code|state)\s*[:=]\s*[^\s,;]+/gi,
       "$1=[redacted]",
     )
     .replace(/\bsk-[A-Za-z0-9_-]+\b/g, "[redacted]")
