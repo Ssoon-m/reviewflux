@@ -262,6 +262,36 @@ describe("operational logging", () => {
     expect(lines[0]).not.toContain("stack trace");
   });
 
+  it("sanitizes allowlisted errorMessage context through shared logging", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-14T19:00:00.000Z"));
+
+    const home = makeTempHome();
+    homes.push(home);
+    process.env.HOME = home;
+
+    const { logging } = await loadLoggingModule();
+    logging({
+      surface: "daemon",
+      type: "queue",
+      level: "error",
+      event: "daemon_cycle_poll_failed",
+      message: "Project polling failed",
+      context: {
+        repo: "a/repo",
+        errorMessage:
+          "provider boom code=abc123 state=xyz987 bearer super-secret-token access_token=secret",
+      },
+    });
+
+    const { records } = readLogFile(getLogPath(home, "daemon", "2026-03-14"));
+    expect(records[0]?.context).toEqual({
+      repo: "a/repo",
+      errorMessage:
+        "provider boom code=[redacted] state=[redacted] bearer [redacted] access_token=[redacted]",
+    });
+  });
+
   it("sanitizes secret-bearing free-form log messages", async () => {
     const { sanitizeOperationalLogMessage } = await loadLoggingModule();
 

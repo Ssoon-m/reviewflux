@@ -133,6 +133,11 @@ function sanitizeContext(context: Record<string, unknown> | undefined): LoggingC
   const sanitized: LoggingContext = {};
   for (const key of LOGGING_CONTEXT_KEYS) {
     const value = context[key];
+    if (key === "errorMessage" && typeof value === "string") {
+      sanitized[key] = sanitizeOperationalLogMessage(value, "redacted_error");
+      continue;
+    }
+
     if (isLoggingContextValue(value)) {
       sanitized[key] = value;
     }
