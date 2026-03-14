@@ -1,37 +1,43 @@
 import { spawn, spawnSync } from "node:child_process";
 import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { Command } from "commander";
 import {
   getModel,
   getModels,
 } from "@mariozechner/pi-ai";
 import { getOAuthProvider, getOAuthProviders } from "@mariozechner/pi-ai/oauth";
+import type { Command } from "commander";
 import {
-  resolveCommandBuilderDependencies,
-  type CommandBuilderDependencies,
-} from "../../cli/command-builder.js";
+  loginWithPiOAuth,
+  resolveOAuthProviderId,
+} from "../../auth/pi-oauth.js";
 import {
   promptPassword,
   promptSelect,
   promptText,
 } from "../../cli/clack-prompter.js";
 import {
-  ensureReviewFluxHome,
-  saveConfig,
+  type CommandBuilderDependencies,
+  resolveCommandBuilderDependencies,
+} from "../../cli/command-builder.js";
+import {
   type AuthMode,
+  ensureReviewFluxHome,
+  getReviewFluxHome,
   type LlmProvider,
   type ReviewFluxConfig,
+  saveConfig,
 } from "../../cli/config.js";
-import { reviewQueuePath } from "../../review/queue/index.js";
 import {
-  loginWithPiOAuth,
-  resolveOAuthProviderId,
-} from "../../auth/pi-oauth.js";
+  logging,
+  type LoggingLevel,
+  type LoggingType,
+} from "../../infra/logging/index.js";
 import {
-  getCustomProviderId,
   type CustomCompatibility,
+  getCustomProviderId,
   validateCustomProviderConfig,
 } from "../../llm/custom-provider.js";
 import {
@@ -41,8 +47,50 @@ import {
   getSelectableModelsForProvider,
 } from "../../llm/provider-catalog.js";
 import { getCodexEffortLevels } from "../../llm/reasoning-effort.js";
+import { reviewQueuePath } from "../../review/queue/index.js";
 
 type SetupOptions = { advanced: boolean };
+type SetupOAuthMode = "browser" | "paste";
+type SetupSemanticEvent =
+  | "setup_started"
+  | "setup_skipped"
+  | "global_guidance_created"
+  | "oauth_authorization_required"
+  | "oauth_browser_opened"
+  | "oauth_browser_open_failed"
+  | "oauth_state_mismatch_retry"
+  | "setup_completed";
+type SetupLoggingContext = {
+  provider?: string;
+  authMode?: AuthMode;
+  oauthMode?: SetupOAuthMode;
+  advanced?: boolean;
+  outcome?: string;
+};
+type SetupCompletionContext = {
+  provider: string;
+  authMode: AuthMode;
+  oauthMode?: SetupOAuthMode;
+  advanced: boolean;
+};
+type SetupSemanticLogEntry = {
+  event: SetupSemanticEvent;
+  type: LoggingType;
+  level: LoggingLevel;
+  message: string;
+  context?: SetupLoggingContext;
+};
+type SetupSemanticLogger = (entry: SetupSemanticLogEntry) => void;
+type OAuthLoginCallbacks = Parameters<typeof loginWithPiOAuth>[1];
+type OAuthAuthCallbackParams = Parameters<
+  NonNullable<OAuthLoginCallbacks["onAuth"]>
+>[0];
+type OAuthPromptCallbackParams = Parameters<
+  NonNullable<OAuthLoginCallbacks["onPrompt"]>
+>[0];
+type OAuthProgressCallbackMessage = Parameters<
+  NonNullable<OAuthLoginCallbacks["onProgress"]>
+>[0];
 
 const GLOBAL_AGENTS_FILE = "AGENTS.md";
 const GLOBAL_AGENTS_TEMPLATE_FILE = "REVIEWFLUX-AGENTS.md";
@@ -65,14 +113,131 @@ export type SetupCommandDependencies = CommandBuilderDependencies<
   SetupCommandHandlers
 >;
 
-function globalAgentsPath(home: string): string {
-  return join(home, GLOBAL_AGENTS_FILE);
+export type SetupFlowCollaborators = {
+  home?: string;
+  promptSelect?: typeof promptSelect;
+  promptPassword?: typeof promptPassword;
+  promptText?: typeof promptText;
+  loginWithPiOAuth?: typeof loginWithPiOAuth;
+  ensureReviewFluxHome?: typeof ensureReviewFluxHome;
+  ensureGlobalAgentsTemplate?: typeof ensureGlobalAgentsTemplate;
+  saveConfig?: typeof saveConfig;
+  releaseInteractiveInput?: typeof releaseInteractiveInput;
+  openBrowser?: typeof openBrowser;
+  getOAuthProvider?: typeof getOAuthProvider;
+  getOAuthProviders?: typeof getOAuthProviders;
+  resolveOAuthProviderId?: typeof resolveOAuthProviderId;
+  getProviderGroupsForSelection?: typeof getProviderGroupsForSelection;
+  getProviderChoiceLabel?: typeof getProviderChoiceLabel;
+  getProviderChoiceHint?: typeof getProviderChoiceHint;
+  getSelectableModelsForProvider?: typeof getSelectableModelsForProvider;
+  getCodexEffortLevels?: typeof getCodexEffortLevels;
+  getModels?: typeof getModels;
+  getModel?: typeof getModel;
+  validateCustomProviderConfig?: typeof validateCustomProviderConfig;
+  getCustomProviderId?: typeof getCustomProviderId;
+  logging?: typeof logging;
+};
+
+type SetupFlowRuntime = {
+  home: string;
+  promptSelect: typeof promptSelect;
+  promptPassword: typeof promptPassword;
+  promptText: typeof promptText;
+  loginWithPiOAuth: typeof loginWithPiOAuth;
+  ensureReviewFluxHome: typeof ensureReviewFluxHome;
+  ensureGlobalAgentsTemplate: typeof ensureGlobalAgentsTemplate;
+  saveConfig: typeof saveConfig;
+  releaseInteractiveInput: typeof releaseInteractiveInput;
+  openBrowser: typeof openBrowser;
+  getOAuthProvider: typeof getOAuthProvider;
+  getOAuthProviders: typeof getOAuthProviders;
+  resolveOAuthProviderId: typeof resolveOAuthProviderId;
+  getProviderGroupsForSelection: typeof getProviderGroupsForSelection;
+  getProviderChoiceLabel: typeof getProviderChoiceLabel;
+  getProviderChoiceHint: typeof getProviderChoiceHint;
+  getSelectableModelsForProvider: typeof getSelectableModelsForProvider;
+  getCodexEffortLevels: typeof getCodexEffortLevels;
+  getModels: typeof getModels;
+  getModel: typeof getModel;
+  validateCustomProviderConfig: typeof validateCustomProviderConfig;
+  getCustomProviderId: typeof getCustomProviderId;
+  logSetupEvent: SetupSemanticLogger;
+};
+
+function createSetupEventLogger(writeLog: typeof logging): SetupSemanticLogger {
+  return (entry) => {
+    writeLog({
+      surface: "setup",
+      type: entry.type,
+      level: entry.level,
+      event: entry.event,
+      message: entry.message,
+      context: entry.context,
+    });
+  };
 }
 
-function logSetupCompletion(path: string, home: string): void {
+function resolveSetupFlowRuntime(
+  collaborators: SetupFlowCollaborators = {},
+): SetupFlowRuntime {
+  return {
+    home: collaborators.home ?? homedir(),
+    promptSelect: collaborators.promptSelect ?? promptSelect,
+    promptPassword: collaborators.promptPassword ?? promptPassword,
+    promptText: collaborators.promptText ?? promptText,
+    loginWithPiOAuth: collaborators.loginWithPiOAuth ?? loginWithPiOAuth,
+    ensureReviewFluxHome:
+      collaborators.ensureReviewFluxHome ?? ensureReviewFluxHome,
+    ensureGlobalAgentsTemplate:
+      collaborators.ensureGlobalAgentsTemplate ?? ensureGlobalAgentsTemplate,
+    saveConfig: collaborators.saveConfig ?? saveConfig,
+    releaseInteractiveInput:
+      collaborators.releaseInteractiveInput ?? releaseInteractiveInput,
+    openBrowser: collaborators.openBrowser ?? openBrowser,
+    getOAuthProvider: collaborators.getOAuthProvider ?? getOAuthProvider,
+    getOAuthProviders: collaborators.getOAuthProviders ?? getOAuthProviders,
+    resolveOAuthProviderId:
+      collaborators.resolveOAuthProviderId ?? resolveOAuthProviderId,
+    getProviderGroupsForSelection:
+      collaborators.getProviderGroupsForSelection ?? getProviderGroupsForSelection,
+    getProviderChoiceLabel:
+      collaborators.getProviderChoiceLabel ?? getProviderChoiceLabel,
+    getProviderChoiceHint:
+      collaborators.getProviderChoiceHint ?? getProviderChoiceHint,
+    getSelectableModelsForProvider:
+      collaborators.getSelectableModelsForProvider ?? getSelectableModelsForProvider,
+    getCodexEffortLevels:
+      collaborators.getCodexEffortLevels ?? getCodexEffortLevels,
+    getModels: collaborators.getModels ?? getModels,
+    getModel: collaborators.getModel ?? getModel,
+    validateCustomProviderConfig:
+      collaborators.validateCustomProviderConfig ?? validateCustomProviderConfig,
+    getCustomProviderId: collaborators.getCustomProviderId ?? getCustomProviderId,
+    logSetupEvent: createSetupEventLogger(collaborators.logging ?? logging),
+  };
+}
+
+function globalAgentsPath(home: string): string {
+  return join(getReviewFluxHome(home), GLOBAL_AGENTS_FILE);
+}
+
+function logSetupCompletion(
+  path: string,
+  home: string,
+  logSetupEvent?: SetupSemanticLogger,
+  context?: SetupCompletionContext,
+): void {
   console.log(`\n[reviewflux] setup complete: ${path}`);
   console.log(`[reviewflux] queue database: ${reviewQueuePath(home)}`);
   console.log("Next: reviewflux daemon start");
+  logSetupEvent?.({
+    event: "setup_completed",
+    type: "lifecycle",
+    level: "info",
+    message: "Setup completed",
+    context: context ? { ...context, outcome: "success" } : undefined,
+  });
 }
 
 function embeddedGlobalAgentsTemplate(): string {
@@ -143,8 +308,11 @@ function assertNonEmpty(value: string, field: string): string {
 }
 
 /** OAuth support comes from pi-ai’s OAuth provider registry only. */
-function isOAuthCapableProvider(provider: string): boolean {
-  return getOAuthProviders().some((p) => p.id === provider);
+function isOAuthCapableProvider(
+  provider: string,
+  getOAuthProvidersFn: typeof getOAuthProviders = getOAuthProviders,
+): boolean {
+  return getOAuthProvidersFn().some((p: { id: string }) => p.id === provider);
 }
 
 /** Use the chosen provider id as-is; pi-ai defines models and auth per provider. */
@@ -159,9 +327,9 @@ function assertModelSupportedByPiAi(params: {
   authMode: AuthMode;
   provider: LlmProvider;
   model: string;
-}): void {
+}, getModelFn: typeof getModel = getModel): void {
   const piProvider = resolveApiProviderForSetup(params);
-  const resolved = getModel(piProvider as never, params.model as never);
+  const resolved = getModelFn(piProvider as never, params.model as never);
   if (!resolved)
     throw new Error(
       `model_not_supported_by_pi_ai:${piProvider}/${params.model}`,
@@ -173,16 +341,16 @@ async function pickDefaultModel(params: {
   authMode: AuthMode;
   provider: LlmProvider;
   defaultModel?: string;
-}): Promise<string> {
+}, runtime: Pick<SetupFlowRuntime, "promptSelect" | "getSelectableModelsForProvider">): Promise<string> {
   const provider = resolveApiProviderForSetup(params);
-  const available = getSelectableModelsForProvider(provider);
+  const available = runtime.getSelectableModelsForProvider(provider);
   const fallback = params.defaultModel ?? available[0]?.id;
 
   if (!fallback) {
     throw new Error(`no_models_for_provider:${params.provider}`);
   }
 
-  return promptSelect<string>({
+  return runtime.promptSelect<string>({
     message: params.message,
     options: available.map((model) => ({
       label: `${model.id} (${model.name})`,
@@ -250,8 +418,12 @@ function manualOAuthPromptForProvider(provider: LlmProvider): {
 
 async function collectOAuthConfig(
   provider: LlmProvider,
-): Promise<NonNullable<ReviewFluxConfig["oauth"]>> {
-  const oauthMode = await promptSelect<"browser" | "paste">({
+  runtime: SetupFlowRuntime,
+): Promise<{
+  oauth: NonNullable<ReviewFluxConfig["oauth"]>;
+  oauthMode: SetupOAuthMode;
+}> {
+  const oauthMode = await runtime.promptSelect<SetupOAuthMode>({
     message: "OAuth setup method",
     options: [
       { label: "Browser login (recommended)", value: "browser" },
@@ -262,39 +434,57 @@ async function collectOAuthConfig(
 
   if (oauthMode === "paste") {
     const accessToken = assertNonEmpty(
-      await promptPassword({ message: "Paste OAuth access token", mask: "*" }),
+      await runtime.promptPassword({
+        message: "Paste OAuth access token",
+        mask: "*",
+      }),
       "oauth_access_token",
     );
-    const refreshTokenRaw = await promptPassword({
+    const refreshTokenRaw = await runtime.promptPassword({
       message: "Refresh token (optional)",
       mask: "*",
     });
     const refreshToken = refreshTokenRaw.trim() || undefined;
 
-    const providerId = resolveOAuthProviderId(provider);
+    const providerId = runtime.resolveOAuthProviderId(provider);
     const projectIdRaw =
       providerId === "google-gemini-cli"
-        ? await promptText({
+        ? await runtime.promptText({
             message: "Google project ID (optional; needed for refresh)",
             initialValue: "",
           })
         : "";
 
     return {
-      oauthProviderId: providerId,
-      accessToken,
-      ...(refreshToken ? { refreshToken } : {}),
-      ...(projectIdRaw.trim() ? { projectId: projectIdRaw.trim() } : {}),
+      oauthMode,
+      oauth: {
+        oauthProviderId: providerId,
+        accessToken,
+        ...(refreshToken ? { refreshToken } : {}),
+        ...(projectIdRaw.trim() ? { projectId: projectIdRaw.trim() } : {}),
+      },
     };
   }
 
   const isGitHubCopilot = provider === "github-copilot";
   const usesCallbackServer =
-    getOAuthProvider(provider)?.usesCallbackServer === true;
+    runtime.getOAuthProvider(provider)?.usesCallbackServer === true;
+  const oauthLoggingContext: SetupLoggingContext = {
+    provider,
+    authMode: "oauth",
+    oauthMode,
+  };
 
-  const callbacks: Parameters<typeof loginWithPiOAuth>[1] = {
-    onAuth: ({ url, instructions }) => {
+  const callbacks: OAuthLoginCallbacks = {
+    onAuth: ({ url, instructions }: OAuthAuthCallbackParams) => {
       console.log("\n[reviewflux] OAuth authorization required");
+      runtime.logSetupEvent({
+        event: "oauth_authorization_required",
+        type: "auth",
+        level: "info",
+        message: "OAuth authorization required",
+        context: oauthLoggingContext,
+      });
       if (isGitHubCopilot) {
         console.log("GitHub Copilot device login");
         console.log(`Verification URL: ${url}`);
@@ -316,16 +506,30 @@ async function collectOAuthConfig(
       }
       console.log("");
 
-      const opened = openBrowser(url);
+      const opened = runtime.openBrowser(url);
       if (opened) {
         console.log("[reviewflux] opening browser for OAuth login...");
+        runtime.logSetupEvent({
+          event: "oauth_browser_opened",
+          type: "auth",
+          level: "info",
+          message: "OAuth browser opened",
+          context: oauthLoggingContext,
+        });
       } else {
         console.log(
           "[reviewflux] browser auto-open failed. open the URL above manually.",
         );
+        runtime.logSetupEvent({
+          event: "oauth_browser_open_failed",
+          type: "auth",
+          level: "warn",
+          message: "OAuth browser open failed",
+          context: oauthLoggingContext,
+        });
       }
     },
-    onPrompt: async (prompt) => {
+    onPrompt: async (prompt: OAuthPromptCallbackParams) => {
       if (
         isGitHubCopilot &&
         prompt.message.includes("GitHub Enterprise URL/domain")
@@ -342,7 +546,7 @@ async function collectOAuthConfig(
           : prompt.placeholder;
 
       while (true) {
-        const value = await promptText({
+        const value = await runtime.promptText({
           message: prompt.message,
           initialValue: anthropicCodePlaceholder ?? "",
         });
@@ -350,7 +554,7 @@ async function collectOAuthConfig(
         console.log("[reviewflux] OAuth input is required.");
       }
     },
-    onProgress: (message) => {
+    onProgress: (message: OAuthProgressCallbackMessage) => {
       if (message?.trim()) console.log(`[reviewflux] ${message}`);
     },
   };
@@ -359,7 +563,7 @@ async function collectOAuthConfig(
     callbacks.onManualCodeInput = async () => {
       const manualPrompt = manualOAuthPromptForProvider(provider);
       return assertNonEmpty(
-        await promptText({
+        await runtime.promptText({
           message: manualPrompt.message,
           placeholder: manualPrompt.placeholder,
         }),
@@ -370,7 +574,10 @@ async function collectOAuthConfig(
 
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
-      return await loginWithPiOAuth(provider, callbacks);
+      return {
+        oauth: await runtime.loginWithPiOAuth(provider, callbacks),
+        oauthMode,
+      };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       const isStateMismatch = /state/i.test(message);
@@ -379,6 +586,13 @@ async function collectOAuthConfig(
         "[reviewflux] OAuth state mismatch detected. Retrying with a fresh login session...",
       );
       console.log("[reviewflux] Use only the latest URL opened by this retry.");
+      runtime.logSetupEvent({
+        event: "oauth_state_mismatch_retry",
+        type: "auth",
+        level: "warn",
+        message: "OAuth state mismatch retry",
+        context: oauthLoggingContext,
+      });
     }
   }
 
@@ -389,8 +603,8 @@ async function pickCodexEffort(params: {
   authMode: AuthMode;
   model: string;
   defaultEffort?: "low" | "medium" | "high" | "xhigh";
-}): Promise<"low" | "medium" | "high" | "xhigh"> {
-  const supported = getCodexEffortLevels({
+}, runtime: Pick<SetupFlowRuntime, "promptSelect" | "getCodexEffortLevels">): Promise<"low" | "medium" | "high" | "xhigh"> {
+  const supported = runtime.getCodexEffortLevels({
     authMode: params.authMode,
     model: params.model,
   });
@@ -398,7 +612,7 @@ async function pickCodexEffort(params: {
     ? "medium"
     : (supported[0] ?? "low");
 
-  return promptSelect<"low" | "medium" | "high" | "xhigh">({
+  return runtime.promptSelect<"low" | "medium" | "high" | "xhigh">({
     message: `Select reasoning effort (${supported.join("/")})`,
     options: supported.map((level) => ({ label: level, value: level })),
     initialValue:
@@ -408,29 +622,36 @@ async function pickCodexEffort(params: {
   });
 }
 
-function defaultBaseUrlForProvider(provider: string): string {
-  const firstModel = getModels(provider as never)[0];
+function defaultBaseUrlForProvider(
+  provider: string,
+  getModelsFn: typeof getModels = getModels,
+): string {
+  const firstModel = getModelsFn(provider as never)[0];
   return firstModel?.baseUrl ?? "https://api.openai.com/v1";
 }
 
 /** Orchestrates prompts for custom provider; validation is delegated to llm/custom-provider. */
-async function saveCustomProviderConfig(): Promise<void> {
-  const home = ensureReviewFluxHome();
+async function saveCustomProviderConfig(
+  options: SetupOptions,
+  runtime: SetupFlowRuntime,
+): Promise<void> {
+  const home = runtime.home;
+  runtime.ensureReviewFluxHome(home);
   const baseUrl = assertNonEmpty(
-    await promptText({
+    await runtime.promptText({
       message: "Custom endpoint base URL",
       initialValue: "https://api.openai.com/v1",
     }),
     "base_url",
   );
   const modelId = assertNonEmpty(
-    await promptText({
+    await runtime.promptText({
       message: "Model ID",
       placeholder: "e.g. gpt-4o or claude-3-5-sonnet",
     }),
     "model_id",
   );
-  const compatibility = (await promptSelect<CustomCompatibility>({
+  const compatibility = (await runtime.promptSelect<CustomCompatibility>({
     message: "API compatibility",
     options: [
       {
@@ -447,17 +668,17 @@ async function saveCustomProviderConfig(): Promise<void> {
     initialValue: "openai",
   })) as CustomCompatibility;
   const key = assertNonEmpty(
-    await promptPassword({ message: "API key", mask: "*" }),
+    await runtime.promptPassword({ message: "API key", mask: "*" }),
     "api_key",
   );
 
-  const validated = validateCustomProviderConfig({
+  const validated = runtime.validateCustomProviderConfig({
     baseUrl,
     modelId,
     compatibility,
     apiKey: key,
   });
-  const provider = getCustomProviderId(validated.compatibility);
+  const provider = runtime.getCustomProviderId(validated.compatibility);
   const profileId = `${provider}:default`;
 
   const config: ReviewFluxConfig = {
@@ -481,17 +702,34 @@ async function saveCustomProviderConfig(): Promise<void> {
     },
   };
 
-  const path = saveConfig(config);
-  logSetupCompletion(path, home);
-  releaseInteractiveInput();
+  const path = runtime.saveConfig(config, home);
+  logSetupCompletion(path, home, runtime.logSetupEvent, {
+    provider,
+    authMode: "apikey",
+    advanced: options.advanced,
+  });
+  runtime.releaseInteractiveInput();
 }
 
-async function runSetup(options: SetupOptions): Promise<void> {
-  const home = ensureReviewFluxHome();
-  const globalAgents = ensureGlobalAgentsTemplate(home);
+export async function runSetupFlow(
+  options: SetupOptions,
+  collaborators: SetupFlowCollaborators = {},
+): Promise<void> {
+  const runtime = resolveSetupFlowRuntime(collaborators);
+  const home = runtime.home;
+  const reviewFluxHome = runtime.ensureReviewFluxHome(home);
+  const globalAgents = runtime.ensureGlobalAgentsTemplate(home);
+
+  runtime.logSetupEvent({
+    event: "setup_started",
+    type: "lifecycle",
+    level: "info",
+    message: "Setup started",
+    context: { advanced: options.advanced },
+  });
 
   console.log("[reviewflux] setup started");
-  console.log(`[reviewflux] config directory: ${home}`);
+  console.log(`[reviewflux] config directory: ${reviewFluxHome}`);
   console.log(`[reviewflux] queue database: ${reviewQueuePath(home)}`);
   if (globalAgents.created) {
     console.log(
@@ -500,9 +738,16 @@ async function runSetup(options: SetupOptions): Promise<void> {
     console.log(
       `[reviewflux] global review template source: ${globalAgents.source}`,
     );
+    runtime.logSetupEvent({
+      event: "global_guidance_created",
+      type: "lifecycle",
+      level: "info",
+      message: "Global guidance created",
+      context: { advanced: options.advanced },
+    });
   }
 
-  const groups = getProviderGroupsForSelection();
+  const groups = runtime.getProviderGroupsForSelection();
   if (groups.length === 0) {
     throw new Error("no_providers_from_pi_ai");
   }
@@ -513,7 +758,7 @@ async function runSetup(options: SetupOptions): Promise<void> {
 
   let provider: LlmProvider;
   while (true) {
-    const selectedGroupKey = await promptSelect<string>({
+    const selectedGroupKey = await runtime.promptSelect<string>({
       message: "Model/auth provider",
       options: [
         {
@@ -530,43 +775,50 @@ async function runSetup(options: SetupOptions): Promise<void> {
       ],
       initialValue:
         groups.find((g) => g.providers.includes("openai-codex"))?.groupKey ??
-        groups[0]!.groupKey,
+        (groups[0] as (typeof groups)[number]).groupKey,
     });
 
     if (selectedGroupKey === SKIP_VALUE) {
       console.log(
         "[reviewflux] setup skipped. Run reviewflux setup again when ready.",
       );
-      releaseInteractiveInput();
+      runtime.logSetupEvent({
+        event: "setup_skipped",
+        type: "lifecycle",
+        level: "info",
+        message: "Setup skipped",
+        context: { advanced: options.advanced, outcome: "skipped" },
+      });
+      runtime.releaseInteractiveInput();
       return;
     }
 
     if (selectedGroupKey === CUSTOM_GROUP_VALUE) {
-      await saveCustomProviderConfig();
+      await saveCustomProviderConfig(options, runtime);
       return;
     }
 
-    const selectedGroup = groups.find((g) => g.groupKey === selectedGroupKey)!;
+    const selectedGroup = groups.find((g) => g.groupKey === selectedGroupKey) as (typeof groups)[number];
 
     if (selectedGroup.providers.length === 1) {
-      provider = selectedGroup.providers[0]!;
+      provider = selectedGroup.providers[0] as LlmProvider;
       break;
     }
 
-    const methodSelection = await promptSelect<string>({
+    const methodSelection = await runtime.promptSelect<string>({
       message: `${selectedGroup.groupLabel} auth method`,
       options: [
         ...selectedGroup.providers.map((p) => ({
-          label: getProviderChoiceLabel(p),
+          label: runtime.getProviderChoiceLabel(p),
           value: p,
-          hint: getProviderChoiceHint(p),
+          hint: runtime.getProviderChoiceHint(p),
         })),
         { label: "Back", value: BACK_VALUE },
       ],
       initialValue:
         selectedGroup.providers.find(
           (p) => p === "openai-codex" || p === "google-gemini-cli",
-        ) ?? selectedGroup.providers[0]!,
+        ) ?? (selectedGroup.providers[0] as string),
     });
 
     if (methodSelection === BACK_VALUE) {
@@ -576,18 +828,22 @@ async function runSetup(options: SetupOptions): Promise<void> {
     break;
   }
 
-  const authMode: AuthMode = isOAuthCapableProvider(provider)
+  const authMode: AuthMode = isOAuthCapableProvider(
+    provider,
+    runtime.getOAuthProviders,
+  )
     ? "oauth"
     : "apikey";
 
   const defaultBaseUrl = defaultBaseUrlForProvider(
     resolveApiProviderForSetup({ authMode, provider }),
+    runtime.getModels,
   );
   let llmApiBaseUrl = defaultBaseUrl;
 
   if (options.advanced) {
     llmApiBaseUrl = assertNonEmpty(
-      (await promptText({
+      (await runtime.promptText({
         message: "LLM API base URL",
         initialValue: defaultBaseUrl,
       })) || defaultBaseUrl,
@@ -599,19 +855,22 @@ async function runSetup(options: SetupOptions): Promise<void> {
 
   if (authMode === "apikey") {
     const key = assertNonEmpty(
-      await promptPassword({ message: "Paste API key", mask: "*" }),
+      await runtime.promptPassword({ message: "Paste API key", mask: "*" }),
       "api_key",
     );
     const model = await pickDefaultModel({
       message: "Select default model",
       authMode,
       provider,
-    });
-    assertModelSupportedByPiAi({ authMode, provider, model });
+    }, runtime);
+    assertModelSupportedByPiAi({ authMode, provider, model }, runtime.getModel);
 
     const effort =
       provider === "openai-codex"
-        ? await pickCodexEffort({ authMode, model, defaultEffort: "medium" })
+        ? await pickCodexEffort(
+            { authMode, model, defaultEffort: "medium" },
+            runtime,
+          )
         : undefined;
 
     const config: ReviewFluxConfig = {
@@ -636,27 +895,34 @@ async function runSetup(options: SetupOptions): Promise<void> {
       },
     };
 
-    const path = saveConfig(config);
-    logSetupCompletion(path, home);
-    releaseInteractiveInput();
+    const path = runtime.saveConfig(config, home);
+    logSetupCompletion(path, home, runtime.logSetupEvent, {
+      provider,
+      authMode,
+      advanced: options.advanced,
+    });
+    runtime.releaseInteractiveInput();
     return;
   }
 
-  if (!isOAuthCapableProvider(provider)) {
+  if (!isOAuthCapableProvider(provider, runtime.getOAuthProviders)) {
     throw new Error(`oauth_not_supported_for_provider:${provider}`);
   }
 
-  const oauth = await collectOAuthConfig(provider);
+  const { oauth, oauthMode } = await collectOAuthConfig(provider, runtime);
   const model = await pickDefaultModel({
     message: "Select default model (OAuth verified)",
     authMode,
     provider,
-  });
-  assertModelSupportedByPiAi({ authMode, provider, model });
+  }, runtime);
+  assertModelSupportedByPiAi({ authMode, provider, model }, runtime.getModel);
 
   const effort =
     provider === "openai-codex"
-      ? await pickCodexEffort({ authMode, model, defaultEffort: "medium" })
+      ? await pickCodexEffort(
+          { authMode, model, defaultEffort: "medium" },
+          runtime,
+        )
       : undefined;
 
   const config: ReviewFluxConfig = {
@@ -680,13 +946,18 @@ async function runSetup(options: SetupOptions): Promise<void> {
     },
   };
 
-  const path = saveConfig(config);
-  logSetupCompletion(path, home);
-  releaseInteractiveInput();
+  const path = runtime.saveConfig(config, home);
+  logSetupCompletion(path, home, runtime.logSetupEvent, {
+    provider,
+    authMode,
+    oauthMode,
+    advanced: options.advanced,
+  });
+  runtime.releaseInteractiveInput();
 }
 
 const defaultSetupCommandHandlers: SetupCommandHandlers = {
-  runSetup,
+  runSetup: runSetupFlow,
 };
 
 function normalizeSetupOptions(options: Partial<SetupOptions> = {}): SetupOptions {
