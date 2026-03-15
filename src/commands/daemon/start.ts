@@ -1,7 +1,7 @@
 import { setTimeout as wait } from "node:timers/promises";
 import { loadConfig } from "../../cli/config.js";
+import { logging } from "../../infra/logging/index.js";
 import { assertGhReady } from "../../review/github.js";
-import type { ProjectConfig } from "../../review/types.js";
 import {
   ReviewJobStore,
   ReviewJobWorker,
@@ -10,6 +10,7 @@ import {
   ReviewQueueDatabase,
   reviewQueuePath,
 } from "../../review/queue/index.js";
+import type { ProjectConfig } from "../../review/types.js";
 
 export { resolveReviewOutputFromModel } from "../../llm/review-output.js";
 
@@ -35,9 +36,83 @@ const JOB_STALE_RUNNING_MS = Math.max(
   resolvePositiveInt(process.env.REVIEWFLUX_JOB_STALE_RUNNING_MS, 5 * 60_000),
   5_000,
 );
-
 type DaemonCycleCoordinator = Pick<ReviewPollCoordinator, "pollProject">;
 type DaemonCycleWorker = Pick<ReviewJobWorker, "drain" | "recoverStaleRunningJobs">;
+type DaemonSemanticEvent =
+  | "daemon_started"
+  | "daemon_no_projects"
+  | "daemon_projects_loaded"
+  | "daemon_cycle_recovered_jobs"
+  | "daemon_cycle_worker_drain_failed"
+  | "daemon_cycle_poll_failed"
+  | "daemon_stopped";
+type DaemonEventLogger = (entry: {
+  event: DaemonSemanticEvent;
+  type: "lifecycle" | "queue";
+  level: "info" | "error";
+  message: string;
+  context?: {
+    repo?: string;
+    projectCount?: number;
+    pollIntervalMs?: number;
+    retryDelayMs?: number;
+    maxAttempts?: number;
+    staleRunningMs?: number;
+    staleRunningCount?: number;
+    errorMessage?: string;
+  };
+}) => void;
+type RegisterSignalHandler = (
+  signal: "SIGINT" | "SIGTERM",
+  listener: () => void,
+) => (() => void) | undefined;
+type DaemonStartCollaborators = {
+  loadConfig?: typeof loadConfig;
+  assertGhReady?: typeof assertGhReady;
+  wait?: typeof wait;
+  registerSignalHandler?: RegisterSignalHandler;
+  runCycle?: (params: {
+    projects: ProjectConfig[];
+    coordinator: DaemonCycleCoordinator;
+    worker: DaemonCycleWorker;
+    logDaemonEvent?: DaemonEventLogger;
+    abortSignal?: AbortSignal;
+  }) => Promise<void>;
+  logging?: typeof logging;
+};
+
+function createDaemonEventLogger(writeLog: typeof logging): DaemonEventLogger {
+  return (entry) => {
+    writeLog({
+      surface: "daemon",
+      type: entry.type,
+      level: entry.level,
+      event: entry.event,
+      message: entry.message,
+      context: entry.context,
+    });
+  };
+}
+
+function resolveErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function isAbortWaitError(error: unknown, signal: AbortSignal): boolean {
+  if (!signal.aborted) {
+    return false;
+  }
+
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  return (
+    error.name === "AbortError"
+    || error.message === "aborted"
+    || ("code" in error && error.code === "ABORT_ERR")
+  );
+}
 
 function logRecoveredJobs(recoveredJobs: number): void {
   if (recoveredJobs > 0) {
@@ -49,35 +124,107 @@ export async function runDaemonCycle(params: {
   projects: ProjectConfig[];
   coordinator: DaemonCycleCoordinator;
   worker: DaemonCycleWorker;
+  logDaemonEvent?: DaemonEventLogger;
+  abortSignal?: AbortSignal;
 }): Promise<void> {
-  logRecoveredJobs(params.worker.recoverStaleRunningJobs());
+  const logDaemonEvent = params.logDaemonEvent ?? createDaemonEventLogger(logging);
+  const recoveredJobs = params.worker.recoverStaleRunningJobs();
+
+  logRecoveredJobs(recoveredJobs);
+  if (recoveredJobs > 0) {
+    logDaemonEvent({
+      event: "daemon_cycle_recovered_jobs",
+      type: "queue",
+      level: "info",
+      message: "Recovered stale review jobs",
+      context: { staleRunningCount: recoveredJobs },
+    });
+  }
+
+  if (params.abortSignal?.aborted) {
+    return;
+  }
 
   try {
-    await params.worker.drain();
+    await params.worker.drain({ signal: params.abortSignal });
   } catch (error) {
+    const errorMessage = resolveErrorMessage(error);
     console.error("[reviewflux] review worker drain failed");
-    console.error(error instanceof Error ? error.message : String(error));
+    console.error(errorMessage);
+    logDaemonEvent({
+      event: "daemon_cycle_worker_drain_failed",
+      type: "queue",
+      level: "error",
+      message: "Review worker drain failed",
+      context: { errorMessage },
+    });
+  }
+
+  if (params.abortSignal?.aborted) {
+    return;
   }
 
   for (const project of params.projects) {
+    if (params.abortSignal?.aborted) {
+      return;
+    }
+
     try {
       await params.coordinator.pollProject(project);
     } catch (error) {
+      const errorMessage = resolveErrorMessage(error);
       console.error(`[reviewflux] polling failed for ${project.repo}`);
-      console.error(error instanceof Error ? error.message : String(error));
+      console.error(errorMessage);
+      logDaemonEvent({
+        event: "daemon_cycle_poll_failed",
+        type: "queue",
+        level: "error",
+        message: "Project polling failed",
+        context: {
+          repo: project.repo,
+          errorMessage,
+        },
+      });
     }
   }
 
+  if (params.abortSignal?.aborted) {
+    return;
+  }
+
   try {
-    await params.worker.drain();
+    await params.worker.drain({ signal: params.abortSignal });
   } catch (error) {
+    const errorMessage = resolveErrorMessage(error);
     console.error("[reviewflux] review worker drain failed");
-    console.error(error instanceof Error ? error.message : String(error));
+    console.error(errorMessage);
+    logDaemonEvent({
+      event: "daemon_cycle_worker_drain_failed",
+      type: "queue",
+      level: "error",
+      message: "Review worker drain failed",
+      context: { errorMessage },
+    });
   }
 }
 
-export async function runDaemonStartCommand(): Promise<void> {
-  const config = loadConfig();
+export async function runDaemonStartCommand(
+  collaborators: DaemonStartCollaborators = {},
+): Promise<void> {
+  const resolveConfig = collaborators.loadConfig ?? loadConfig;
+  const requireGhReady = collaborators.assertGhReady ?? assertGhReady;
+  const waitForNextPoll = collaborators.wait ?? wait;
+  const registerSignalHandler =
+    collaborators.registerSignalHandler
+    ?? ((signal: "SIGINT" | "SIGTERM", listener: () => void) => {
+      process.once(signal, listener);
+      return () => {
+        process.off(signal, listener);
+      };
+    });
+  const runCycle = collaborators.runCycle ?? runDaemonCycle;
+  const logDaemonEvent = createDaemonEventLogger(collaborators.logging ?? logging);
+  const config = resolveConfig();
   const projects = Object.values(config.projects ?? {}).sort((a, b) =>
     a.repo.localeCompare(b.repo),
   );
@@ -88,10 +235,17 @@ export async function runDaemonStartCommand(): Promise<void> {
     console.log(
       "[reviewflux] no projects configured. run: reviewflux project add",
     );
+    logDaemonEvent({
+      event: "daemon_no_projects",
+      type: "lifecycle",
+      level: "info",
+      message: "No projects configured for daemon",
+      context: { projectCount: 0 },
+    });
     return;
   }
 
-  await assertGhReady();
+  await requireGhReady();
 
   console.log(`[reviewflux] gh polling mode enabled (${POLL_INTERVAL_MS}ms)`);
   console.log(`[reviewflux] tracking ${projects.length} project(s)`);
@@ -110,6 +264,20 @@ export async function runDaemonStartCommand(): Promise<void> {
   console.log("[reviewflux] force command is always enabled: @reviewflux");
   console.log(`[reviewflux] queue database: ${reviewQueuePath()}`);
 
+  logDaemonEvent({
+    event: "daemon_projects_loaded",
+    type: "lifecycle",
+    level: "info",
+    message: "Daemon projects loaded",
+    context: {
+      projectCount: projects.length,
+      pollIntervalMs: POLL_INTERVAL_MS,
+      retryDelayMs: JOB_RETRY_DELAY_MS,
+      maxAttempts: JOB_MAX_ATTEMPTS,
+      staleRunningMs: JOB_STALE_RUNNING_MS,
+    },
+  });
+
   const database = new ReviewQueueDatabase();
   const pollStateStore = new ReviewPollStateStore(database);
   const jobStore = new ReviewJobStore(database);
@@ -120,28 +288,79 @@ export async function runDaemonStartCommand(): Promise<void> {
     staleRunningMs: JOB_STALE_RUNNING_MS,
   });
   const abortController = new AbortController();
+  const unregisterSignalHandlers: Array<() => void> = [];
+  let didLogStop = false;
 
-  const shutdown = () => {
-    abortController.abort();
+  const logDaemonStopped = () => {
+    if (didLogStop) {
+      return;
+    }
+
+    didLogStop = true;
     console.log("\n[reviewflux] daemon stopped");
+    logDaemonEvent({
+      event: "daemon_stopped",
+      type: "lifecycle",
+      level: "info",
+      message: "Daemon stopped",
+    });
   };
 
-  process.once("SIGINT", shutdown);
-  process.once("SIGTERM", shutdown);
+  const shutdown = () => {
+    if (abortController.signal.aborted) {
+      return;
+    }
+    abortController.abort();
+  };
+
+  for (const signal of ["SIGINT", "SIGTERM"] as const) {
+    const unregister = registerSignalHandler(signal, shutdown);
+    if (typeof unregister === "function") {
+      unregisterSignalHandlers.push(unregister);
+    }
+  }
+
+  logDaemonEvent({
+    event: "daemon_started",
+    type: "lifecycle",
+    level: "info",
+    message: "Daemon started",
+    context: {
+      projectCount: projects.length,
+      pollIntervalMs: POLL_INTERVAL_MS,
+      retryDelayMs: JOB_RETRY_DELAY_MS,
+      maxAttempts: JOB_MAX_ATTEMPTS,
+      staleRunningMs: JOB_STALE_RUNNING_MS,
+    },
+  });
 
   try {
     while (!abortController.signal.aborted) {
-      await runDaemonCycle({ projects, coordinator, worker });
+      await runCycle({
+        projects,
+        coordinator,
+        worker,
+        logDaemonEvent,
+        abortSignal: abortController.signal,
+      });
 
       try {
-        await wait(POLL_INTERVAL_MS, undefined, {
+        await waitForNextPoll(POLL_INTERVAL_MS, undefined, {
           signal: abortController.signal,
         });
-      } catch {
-        break;
+      } catch (error) {
+        if (isAbortWaitError(error, abortController.signal)) {
+          break;
+        }
+
+        throw error;
       }
     }
   } finally {
+    logDaemonStopped();
+    for (const unregister of unregisterSignalHandlers) {
+      unregister();
+    }
     database.close();
   }
 }

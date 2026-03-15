@@ -1,6 +1,9 @@
 import { Command, CommanderError } from "commander";
 import { describe, expect, it, vi } from "vitest";
-import { buildSetupCommand } from "../src/commands/setup/index.js";
+import {
+  buildSetupCommand,
+  runSetupFlow,
+} from "../src/commands/setup/index.js";
 import { createCommanderTestHarness } from "./commander-test-harness.js";
 
 function createSetupHarness(runSetup = vi.fn(async () => {})) {
@@ -16,6 +19,10 @@ function createSetupHarness(runSetup = vi.fn(async () => {})) {
 }
 
 describe("setup-command", () => {
+  it("exports a direct setup flow helper for collaborator-driven tests", () => {
+    expect(runSetupFlow).toBeTypeOf("function");
+  });
+
   it("routes setup --advanced to advanced=true", async () => {
     const { harness, runSetup } = createSetupHarness();
     const { error } = await harness.run(["setup", "--advanced"]);

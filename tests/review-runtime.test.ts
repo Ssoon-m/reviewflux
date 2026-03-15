@@ -1,6 +1,66 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReviewFluxConfig } from "../src/cli/config.js";
 import type { ReviewState } from "../src/review/state-store.js";
+
+const REVIEW_RUNTIME_LOG_TS = new Date("2026-03-16T01:02:03.000Z");
+const REVIEW_RUNTIME_LOG_DATE = "2026-03-16";
+
+type ReviewRuntimeLogContext = Record<
+  string,
+  string | number | boolean | undefined
+>;
+
+type ReviewRuntimeLogRecord = {
+  ts: string;
+  date: string;
+  surface: "review-runtime";
+  type: "review";
+  level: "info" | "warn" | "error";
+  event: string;
+  message: string;
+  context: ReviewRuntimeLogContext;
+};
+
+const homes: string[] = [];
+const originalHome = process.env.HOME;
+let home = "";
+
+function makeTempHome(): string {
+  return mkdtempSync(join(tmpdir(), "reviewflux-review-runtime-"));
+}
+
+function getReviewRuntimeLogPath(currentHome: string): string {
+  return join(
+    currentHome,
+    ".reviewflux",
+    "logs",
+    REVIEW_RUNTIME_LOG_DATE,
+    "review-runtime.jsonl",
+  );
+}
+
+function readReviewRuntimeLog(currentHome: string): {
+  raw: string;
+  records: ReviewRuntimeLogRecord[];
+} {
+  const raw = readFileSync(getReviewRuntimeLogPath(currentHome), "utf8");
+  return {
+    raw,
+    records: raw
+      .split("\n")
+      .filter((line) => line.length > 0)
+      .map((line) => JSON.parse(line) as ReviewRuntimeLogRecord),
+  };
+}
+
+async function flushAsyncWork(): Promise<void> {
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+}
 
 const mocks = vi.hoisted(() => ({
   getModelMock: vi.fn(),
@@ -88,12 +148,27 @@ function makeConfig(): ReviewFluxConfig {
   };
 }
 
+function makeProject() {
+  const project = makeConfig().projects?.["ssoon-m/reviewflux"];
+  if (!project) {
+    throw new Error("missing test project config");
+  }
+
+  return project;
+}
+
 function makeState(): ReviewState {
   return { projects: {} };
 }
 
 beforeEach(() => {
   vi.restoreAllMocks();
+  vi.useFakeTimers();
+  vi.setSystemTime(REVIEW_RUNTIME_LOG_TS);
+
+  home = makeTempHome();
+  homes.push(home);
+  process.env.HOME = home;
 
   mocks.getModelMock.mockReset();
   mocks.createLlmProviderMock.mockReset();
@@ -137,6 +212,20 @@ beforeEach(() => {
   mocks.postReviewOutputMock.mockResolvedValue(undefined);
 });
 
+afterEach(() => {
+  for (const currentHome of homes.splice(0)) {
+    rmSync(currentHome, { recursive: true, force: true });
+  }
+
+  if (originalHome === undefined) {
+    delete process.env.HOME;
+  } else {
+    process.env.HOME = originalHome;
+  }
+
+  vi.useRealTimers();
+});
+
 describe("runReviewJob", () => {
   it("replies in the review thread for manual review comment triggers", async () => {
     const state = makeState();
@@ -154,7 +243,7 @@ describe("runReviewJob", () => {
 
     await runReviewJob({
       config: makeConfig(),
-      project: makeConfig().projects!["ssoon-m/reviewflux"],
+      project: makeProject(),
       repo: "ssoon-m/reviewflux",
       prNumber: 7,
       reason: "manual_force",
@@ -202,7 +291,7 @@ describe("runReviewJob", () => {
 
     await runReviewJob({
       config: makeConfig(),
-      project: makeConfig().projects!["ssoon-m/reviewflux"],
+      project: makeProject(),
       repo: "ssoon-m/reviewflux",
       prNumber: 7,
       reason: "manual_force",
@@ -254,7 +343,7 @@ describe("runReviewJob", () => {
 
     await runReviewJob({
       config: makeConfig(),
-      project: makeConfig().projects!["ssoon-m/reviewflux"],
+      project: makeProject(),
       repo: "ssoon-m/reviewflux",
       prNumber: 7,
       reason: "manual_force",
@@ -291,7 +380,7 @@ describe("runReviewJob", () => {
 
     await runReviewJob({
       config: makeConfig(),
-      project: makeConfig().projects!["ssoon-m/reviewflux"],
+      project: makeProject(),
       repo: "ssoon-m/reviewflux",
       prNumber: 7,
       reason: "manual_force",
@@ -312,6 +401,23 @@ describe("runReviewJob", () => {
         "no new issues beyond existing ReviewFlux findings",
       ),
     });
+
+    const { raw, records } = readReviewRuntimeLog(home);
+    expect(records).toHaveLength(1);
+    expect(records[0]).toMatchObject({
+      date: REVIEW_RUNTIME_LOG_DATE,
+      surface: "review-runtime",
+      type: "review",
+      level: "info",
+      event: "review_manual_no_new_findings_response",
+      context: {
+        repo: "ssoon-m/reviewflux",
+        prNumber: 7,
+        reason: "manual_force",
+        eventKey: "pull_request_review_comment:321",
+      },
+    });
+    expect(raw).not.toContain(body);
   });
 
   it("skips posting duplicate automatic findings but still records the reviewed sha", async () => {
@@ -326,7 +432,7 @@ describe("runReviewJob", () => {
 
     await runReviewJob({
       config: makeConfig(),
-      project: makeConfig().projects!["ssoon-m/reviewflux"],
+      project: makeProject(),
       repo: "ssoon-m/reviewflux",
       prNumber: 7,
       reason: "on_push",
@@ -339,6 +445,23 @@ describe("runReviewJob", () => {
     expect(state.projects["ssoon-m/reviewflux"]?.postedReviewKeys).toContain(
       "7:headsha:on_push",
     );
+
+    const { raw, records } = readReviewRuntimeLog(home);
+    expect(records).toHaveLength(1);
+    expect(records[0]).toMatchObject({
+      date: REVIEW_RUNTIME_LOG_DATE,
+      surface: "review-runtime",
+      type: "review",
+      level: "info",
+      event: "review_skipped_no_new_findings",
+      context: {
+        repo: "ssoon-m/reviewflux",
+        prNumber: 7,
+        reason: "on_push",
+        eventKey: "7:headsha:on_push",
+      },
+    });
+    expect(raw).not.toContain(body);
   });
 
   it("short-circuits automatic reviews already recorded for the current sha", async () => {
@@ -356,7 +479,7 @@ describe("runReviewJob", () => {
 
     await runReviewJob({
       config: makeConfig(),
-      project: makeConfig().projects!["ssoon-m/reviewflux"],
+      project: makeProject(),
       repo: "ssoon-m/reviewflux",
       prNumber: 7,
       reason: "on_push",
@@ -366,6 +489,22 @@ describe("runReviewJob", () => {
     expect(mocks.generateReplyMock).not.toHaveBeenCalled();
     expect(mocks.postReviewOutputMock).not.toHaveBeenCalled();
     expect(mocks.postPullRequestCommentMock).not.toHaveBeenCalled();
+
+    const { records } = readReviewRuntimeLog(home);
+    expect(records).toHaveLength(1);
+    expect(records[0]).toMatchObject({
+      date: REVIEW_RUNTIME_LOG_DATE,
+      surface: "review-runtime",
+      type: "review",
+      level: "info",
+      event: "review_skipped_already_posted",
+      context: {
+        repo: "ssoon-m/reviewflux",
+        prNumber: 7,
+        reason: "on_push",
+        eventKey: "7:headsha:on_push",
+      },
+    });
   });
 
   it("short-circuits manual triggers that were already handled", async () => {
@@ -383,7 +522,7 @@ describe("runReviewJob", () => {
 
     await runReviewJob({
       config: makeConfig(),
-      project: makeConfig().projects!["ssoon-m/reviewflux"],
+      project: makeProject(),
       repo: "ssoon-m/reviewflux",
       prNumber: 7,
       reason: "manual_force",
@@ -398,5 +537,162 @@ describe("runReviewJob", () => {
     expect(mocks.postReviewOutputMock).not.toHaveBeenCalled();
     expect(mocks.postPullRequestCommentMock).not.toHaveBeenCalled();
     expect(mocks.postPullRequestReviewReplyMock).not.toHaveBeenCalled();
+
+    const { records } = readReviewRuntimeLog(home);
+    expect(records).toHaveLength(1);
+    expect(records[0]).toMatchObject({
+      date: REVIEW_RUNTIME_LOG_DATE,
+      surface: "review-runtime",
+      type: "review",
+      level: "info",
+      event: "review_skipped_manual_trigger_handled",
+      context: {
+        repo: "ssoon-m/reviewflux",
+        prNumber: 7,
+        reason: "manual_force",
+        eventKey: "issue_comment:555",
+      },
+    });
+  });
+
+  it("logs a redacted context-load failure and review-posted outcome", async () => {
+    const state = makeState();
+    const sensitiveDiff = "SECRET_DIFF_TEXT";
+    const sensitiveContext = "SECRET_PROJECT_CONTEXT_TEXT";
+    const sensitivePrompt = "SECRET_PROMPT_TEXT";
+    const sensitiveRaw = "SECRET_RAW_LLM_OUTPUT";
+    const sensitiveBody = buildFindingBody(
+      "Posted finding",
+      "SECRET_RENDERED_REVIEW_BODY",
+    );
+    mocks.ghExecMock.mockResolvedValue(sensitiveDiff);
+    mocks.buildRemoteProjectContextTextMock.mockRejectedValue(
+      new Error(`context boom ${sensitiveContext} ${sensitivePrompt}`),
+    );
+    mocks.generateReplyMock.mockResolvedValue(sensitiveRaw);
+    mocks.resolveReviewOutputFromModelMock.mockReturnValue({
+      findings: [{ path: "", line: "", body: sensitiveBody }],
+    });
+
+    await runReviewJob({
+      config: makeConfig(),
+      project: makeProject(),
+      repo: "ssoon-m/reviewflux",
+      prNumber: 7,
+      reason: "on_push",
+      state,
+    });
+
+    expect(console.error).toHaveBeenNthCalledWith(
+      1,
+      "[reviewflux] failed to load context for ssoon-m/reviewflux@basesha",
+    );
+    expect(console.error).toHaveBeenNthCalledWith(
+      2,
+      `context boom ${sensitiveContext} ${sensitivePrompt}`,
+    );
+
+    const { raw, records } = readReviewRuntimeLog(home);
+    expect(records).toHaveLength(2);
+    expect(records[0]).toMatchObject({
+      date: REVIEW_RUNTIME_LOG_DATE,
+      surface: "review-runtime",
+      type: "review",
+      level: "error",
+      event: "review_context_load_failed",
+      context: {
+        repo: "ssoon-m/reviewflux",
+        prNumber: 7,
+        reason: "on_push",
+        eventKey: "7:headsha:on_push",
+        errorMessage: "project_context_load_failed",
+      },
+    });
+    expect(records[1]).toMatchObject({
+      date: REVIEW_RUNTIME_LOG_DATE,
+      surface: "review-runtime",
+      type: "review",
+      level: "info",
+      event: "review_posted",
+      context: {
+        repo: "ssoon-m/reviewflux",
+        prNumber: 7,
+        reason: "on_push",
+        eventKey: "7:headsha:on_push",
+      },
+    });
+    expect(raw).not.toContain(sensitiveDiff);
+    expect(raw).not.toContain(sensitiveContext);
+    expect(raw).not.toContain(sensitivePrompt);
+    expect(raw).not.toContain(sensitiveRaw);
+    expect(raw).not.toContain(sensitiveBody);
+  });
+
+  it("logs an in-flight duplicate skip without posting a second review", async () => {
+    const state = makeState();
+    let resolveProjectContext: ((value: string) => void) | undefined;
+    mocks.buildRemoteProjectContextTextMock.mockImplementationOnce(
+      () =>
+        new Promise<string>((resolve) => {
+          resolveProjectContext = resolve;
+        }),
+    );
+
+    const firstJob = runReviewJob({
+      config: makeConfig(),
+      project: makeProject(),
+      repo: "ssoon-m/reviewflux",
+      prNumber: 7,
+      reason: "on_push",
+      state,
+    });
+
+    await flushAsyncWork();
+    expect(mocks.buildRemoteProjectContextTextMock).toHaveBeenCalledTimes(1);
+
+    await runReviewJob({
+      config: makeConfig(),
+      project: makeProject(),
+      repo: "ssoon-m/reviewflux",
+      prNumber: 7,
+      reason: "on_push",
+      state,
+    });
+
+    resolveProjectContext?.("");
+    await firstJob;
+
+    expect(mocks.generateReplyMock).toHaveBeenCalledTimes(1);
+    expect(mocks.postReviewOutputMock).toHaveBeenCalledTimes(1);
+    expect(existsSync(getReviewRuntimeLogPath(home))).toBe(true);
+
+    const { records } = readReviewRuntimeLog(home);
+    expect(records).toHaveLength(2);
+    expect(records[0]).toMatchObject({
+      date: REVIEW_RUNTIME_LOG_DATE,
+      surface: "review-runtime",
+      type: "review",
+      level: "info",
+      event: "review_skipped_in_flight_duplicate",
+      context: {
+        repo: "ssoon-m/reviewflux",
+        prNumber: 7,
+        reason: "on_push",
+        eventKey: "7:headsha:on_push",
+      },
+    });
+    expect(records[1]).toMatchObject({
+      date: REVIEW_RUNTIME_LOG_DATE,
+      surface: "review-runtime",
+      type: "review",
+      level: "info",
+      event: "review_posted",
+      context: {
+        repo: "ssoon-m/reviewflux",
+        prNumber: 7,
+        reason: "on_push",
+        eventKey: "7:headsha:on_push",
+      },
+    });
   });
 });

@@ -1,11 +1,5 @@
+import { logging } from "../../infra/logging/index.js";
 import { normalizeRepoKey } from "../../project/input.js";
-import {
-  buildAutomaticReviewEventKey,
-  buildManualReviewEventKey,
-} from "./event-key.js";
-import type { ReviewJobStore } from "./job-store.js";
-import type { ReviewPollStateStore } from "./poll-state-store.js";
-import type { EnqueueReviewJobInput, ProjectPollSnapshot } from "./types.js";
 import {
   fetchIssueInfo,
   ghApiPaginatedJson,
@@ -18,6 +12,13 @@ import type {
   PullReviewComment,
   ReviewTriggerReason,
 } from "../types.js";
+import {
+  buildAutomaticReviewEventKey,
+  buildManualReviewEventKey,
+} from "./event-key.js";
+import type { ReviewJobStore } from "./job-store.js";
+import type { ReviewPollStateStore } from "./poll-state-store.js";
+import type { EnqueueReviewJobInput, ProjectPollSnapshot } from "./types.js";
 
 type AutomaticReviewReason = Exclude<ReviewTriggerReason, "manual_force">;
 
@@ -69,11 +70,55 @@ function resolveReasonForPrAction(
 }
 
 function maxCommentId<T extends { id: number }>(comments: T[]): number | null {
-  if (comments.length === 0) return null;
-  return comments.reduce(
+  const [firstComment, ...restComments] = comments;
+  if (!firstComment) return null;
+  return restComments.reduce(
     (max, comment) => Math.max(max, comment.id),
-    comments[0]!.id,
+    firstComment.id,
   );
+}
+
+function logPollBaselinePrimed(repoKey: string): void {
+  logging({
+    surface: "queue-poller",
+    type: "queue",
+    level: "info",
+    event: "poll_baseline_primed",
+    message: "Poll baseline primed",
+    context: {
+      repo: repoKey,
+    },
+  });
+}
+
+function logPollJobsEnqueued(
+  repoKey: string,
+  jobs: EnqueueReviewJobInput[],
+): void {
+  let automaticCount = 0;
+  let manualCount = 0;
+
+  for (const job of jobs) {
+    if (job.reason === "manual_force") {
+      manualCount += 1;
+      continue;
+    }
+
+    automaticCount += 1;
+  }
+
+  logging({
+    surface: "queue-poller",
+    type: "queue",
+    level: "info",
+    event: "poll_jobs_enqueued",
+    message: "Poll jobs enqueued",
+    context: {
+      repo: repoKey,
+      automaticCount,
+      manualCount,
+    },
+  });
 }
 
 export class ReviewPollCoordinator {
@@ -89,7 +134,7 @@ export class ReviewPollCoordinator {
 
     if (!snapshot.initialized) {
       await this.primeProject(project, snapshot);
-      console.log(`[reviewflux] baseline primed (no backfill): ${repoKey}`);
+      logPollBaselinePrimed(repoKey);
       return;
     }
 
@@ -99,6 +144,9 @@ export class ReviewPollCoordinator {
       forceCommand,
     );
     this.persistSnapshot(nextSnapshot);
+    if (nextSnapshot.jobs.length > 0) {
+      logPollJobsEnqueued(snapshot.repoKey, nextSnapshot.jobs);
+    }
   }
 
   private async primeProject(

@@ -1,6 +1,5 @@
-import { mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { createRequire } from "node:module";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -29,6 +28,14 @@ afterEach(() => {
 });
 
 describe("review queue storage", () => {
+  it("builds the queue database path from the raw user home once", () => {
+    const home = makeTempHome();
+    homes.push(home);
+
+    expect(reviewQueuePath(home)).toBe(join(home, ".reviewflux", "reviewflux.db"));
+    expect(reviewQueuePath(home)).not.toContain(join(".reviewflux", ".reviewflux"));
+  });
+
   it("applies sqlite settings and bootstraps schema metadata", () => {
     const home = makeTempHome();
     homes.push(home);
@@ -207,28 +214,31 @@ describe("review queue storage", () => {
          workerId: "worker-a",
          now: "2026-03-12T00:00:01.000Z",
        });
-       expect(claimed).toMatchObject({
-         repoKey: "ssoon-m/reviewflux",
-         prNumber: 13,
+        expect(claimed).toMatchObject({
+          repoKey: "ssoon-m/reviewflux",
+          prNumber: 13,
          status: "running",
          attempts: 1,
-         workerId: "worker-a",
-         heartbeatAt: "2026-03-12T00:00:01.000Z",
-       });
+          workerId: "worker-a",
+          heartbeatAt: "2026-03-12T00:00:01.000Z",
+        });
+        if (!claimed) {
+          throw new Error("expected_claimed_job");
+        }
 
-       expect(
-         jobStore.claimNextRunnableJob({
+        expect(
+          jobStore.claimNextRunnableJob({
            workerId: "worker-b",
            now: "2026-03-12T00:00:02.000Z",
          }),
        ).toBeNull();
 
-       expect(
-         jobStore.markDone({
-           jobId: claimed!.id,
-           workerId: "worker-a",
-           completedAt: "2026-03-12T00:00:03.000Z",
-         }),
+        expect(
+          jobStore.markDone({
+            jobId: claimed.id,
+            workerId: "worker-a",
+            completedAt: "2026-03-12T00:00:03.000Z",
+          }),
        ).toBe(true);
        expect(
          jobStore.claimNextRunnableJob({
@@ -277,10 +287,13 @@ describe("review queue storage", () => {
         workerId: "worker-a",
         heartbeatAt: "2026-03-12T00:00:01.000Z",
       });
+      if (!firstAttempt) {
+        throw new Error("expected_first_attempt");
+      }
 
       expect(
         jobStore.markDone({
-          jobId: firstAttempt!.id,
+          jobId: firstAttempt.id,
           workerId: "worker-b",
           completedAt: "2026-03-12T00:00:02.000Z",
         }),
@@ -288,7 +301,7 @@ describe("review queue storage", () => {
 
       expect(
         jobStore.refreshRunningJobHeartbeat({
-          jobId: firstAttempt!.id,
+          jobId: firstAttempt.id,
           workerId: "worker-a",
           heartbeatAt: "2026-03-12T00:00:03.000Z",
         }),

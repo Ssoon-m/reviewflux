@@ -1,3 +1,4 @@
+import { logging } from "../../infra/logging/index.js";
 import {
   ReviewJobStore,
   ReviewQueueDatabase,
@@ -37,6 +38,21 @@ export async function runDaemonStatusCommand(): Promise<void> {
     console.log(
       `[reviewflux] oldest running claimed_at: ${snapshot.oldestRunningClaimedAt ?? "none"}`,
     );
+
+    logging({
+      surface: "daemon",
+      type: "queue",
+      level: "info",
+      event: "daemon_status_snapshot",
+      message: "Daemon status snapshot",
+      context: {
+        pending: snapshot.counts.pending,
+        running: snapshot.counts.running,
+        done: snapshot.counts.done,
+        failed: snapshot.counts.failed,
+        staleRunningCount: snapshot.staleRunningCount,
+      },
+    });
   } finally {
     database.close();
   }

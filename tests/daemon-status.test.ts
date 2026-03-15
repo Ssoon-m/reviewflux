@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -9,8 +9,30 @@ import {
   reviewQueuePath,
 } from "../src/review/queue/index.js";
 
+type DaemonLogRecord = {
+  ts: string;
+  date: string;
+  surface: "daemon";
+  type: "lifecycle" | "queue" | "system";
+  level: "info" | "warn" | "error";
+  event: string;
+  message: string;
+  context: Record<string, string | number | boolean | undefined>;
+};
+
 function makeTempHome(): string {
   return mkdtempSync(join(tmpdir(), "reviewflux-status-"));
+}
+
+function getDaemonLogPath(home: string, date: string): string {
+  return join(home, ".reviewflux", "logs", date, "daemon.jsonl");
+}
+
+function readDaemonLog(home: string, date: string): DaemonLogRecord[] {
+  return readFileSync(getDaemonLogPath(home, date), "utf8")
+    .split("\n")
+    .filter((line) => line.length > 0)
+    .map((line) => JSON.parse(line) as DaemonLogRecord);
 }
 
 const homes: string[] = [];
@@ -107,16 +129,20 @@ describe("daemon status", () => {
       expect(doneJob).not.toBeNull();
       expect(failedJob).not.toBeNull();
 
+      if (!doneJob || !failedJob) {
+        throw new Error("expected claimed jobs for done and failed cases");
+      }
+
       expect(
         jobStore.markDone({
-          jobId: doneJob!.id,
+          jobId: doneJob.id,
           workerId: "worker-a",
           completedAt: "2026-03-12T00:00:04.000Z",
         }),
       ).toBe(true);
       expect(
         jobStore.markFailed({
-          jobId: failedJob!.id,
+          jobId: failedJob.id,
           workerId: "worker-a",
           error: "boom",
           failedAt: "2026-03-12T00:00:05.000Z",
@@ -135,6 +161,24 @@ describe("daemon status", () => {
           "[reviewflux] stale running (>5000ms): 1",
           "[reviewflux] oldest pending available_at: 2026-03-12T00:00:00.000Z",
           "[reviewflux] oldest running claimed_at: 2026-03-12T00:00:01.000Z",
+        ]);
+        expect(readDaemonLog(home, "2026-03-12")).toEqual([
+          {
+            ts: "2026-03-12T00:00:10.000Z",
+            date: "2026-03-12",
+            surface: "daemon",
+            type: "queue",
+            level: "info",
+            event: "daemon_status_snapshot",
+            message: "Daemon status snapshot",
+            context: {
+              pending: 1,
+              running: 1,
+              done: 1,
+              failed: 1,
+              staleRunningCount: 1,
+            },
+          },
         ]);
       } finally {
         logSpy.mockRestore();
