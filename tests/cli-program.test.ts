@@ -10,7 +10,7 @@ describe("cli-program", () => {
 
     expect(harness.program.name()).toBe("reviewflux");
     expect(harness.program.commands.map((command) => command.name())).toEqual(
-      expect.arrayContaining(["setup", "project", "daemon"]),
+      expect.arrayContaining(["setup", "repo", "daemon"]),
     );
   });
 
@@ -22,7 +22,7 @@ describe("cli-program", () => {
     expect((error as CommanderError).code).toBe("commander.helpDisplayed");
     expect(stdout).toContain("Usage: reviewflux");
     expect(stdout).toContain("help [command]");
-    expect(stdout).toContain("project");
+    expect(stdout).toContain("repo");
   });
 
   it("shows root help when the help command is invoked without a topic", async () => {
@@ -36,24 +36,24 @@ describe("cli-program", () => {
     expect(stdout).toContain("daemon");
   });
 
-  it("shows help project from the Commander runtime", async () => {
+  it("shows help repo from the Commander runtime", async () => {
     const harness = createCommanderTestHarness(buildProgram);
-    const { error, stdout } = await harness.run(["help", "project"]);
+    const { error, stdout } = await harness.run(["help", "repo"]);
 
     expect(error).toBeInstanceOf(CommanderError);
     expect((error as CommanderError).code).toBe("commander.help");
-    expect(stdout).toContain("Usage: reviewflux project");
+    expect(stdout).toContain("Usage: reviewflux repo");
     expect(stdout).toContain("set-model");
   });
 
-  it("shows project help when the project group is invoked without a subcommand", async () => {
+  it("shows repo help when the repo group is invoked without a subcommand", async () => {
     const harness = createCommanderTestHarness(buildProgram);
-    const { error, stdout, stderr } = await harness.run(["project"]);
+    const { error, stdout, stderr } = await harness.run(["repo"]);
     const output = `${stdout}${stderr}`;
 
     expect(error).toBeInstanceOf(CommanderError);
     expect((error as CommanderError).code).toBe("commander.help");
-    expect(output).toContain("Usage: reviewflux project");
+    expect(output).toContain("Usage: reviewflux repo");
     expect(output).toContain("remove");
   });
 
@@ -111,7 +111,7 @@ describe("cli-program", () => {
   it("merges injected handlers over builder defaults", () => {
     const defaults = {
       runSetupCommand: vi.fn(async () => {}),
-      runProjectListCommand: vi.fn(async () => {}),
+      runRepoListCommand: vi.fn(async () => {}),
     };
     const injectedRunSetupCommand = vi.fn(async () => {});
 
@@ -120,6 +120,6 @@ describe("cli-program", () => {
     });
 
     expect(handlers.runSetupCommand).toBe(injectedRunSetupCommand);
-    expect(handlers.runProjectListCommand).toBe(defaults.runProjectListCommand);
+    expect(handlers.runRepoListCommand).toBe(defaults.runRepoListCommand);
   });
 });

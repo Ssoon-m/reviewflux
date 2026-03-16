@@ -1,8 +1,8 @@
 import { promptText } from "../../cli/clack-prompter.js";
 import { loadConfig, saveConfig } from "../../cli/config.js";
-import { normalizeRepoInput } from "../../project/input.js";
+import { normalizeRepoInput } from "../../lib/repo/input.js";
 
-export async function runProjectRemoveCommand(): Promise<void> {
+export async function runRepoRemoveCommand(): Promise<void> {
   const config = loadConfig();
 
   const repoInput = await promptText({
@@ -11,13 +11,13 @@ export async function runProjectRemoveCommand(): Promise<void> {
   });
   const repo = normalizeRepoInput(repoInput);
 
-  const projects = { ...(config.projects ?? {}) };
-  if (!projects[repo]) {
-    throw new Error(`project_not_found:${repo}`);
+  const repoConfigs = { ...(config.projects ?? {}) };
+  if (!repoConfigs[repo]) {
+    throw new Error(`repo_not_found:${repo}`);
   }
 
-  delete projects[repo];
-  config.projects = Object.keys(projects).length > 0 ? projects : undefined;
+  delete repoConfigs[repo];
+  config.projects = Object.keys(repoConfigs).length > 0 ? repoConfigs : undefined;
 
   if (config.repoModelPolicies?.[repo]) {
     const nextPolicies = { ...config.repoModelPolicies };
@@ -26,5 +26,5 @@ export async function runProjectRemoveCommand(): Promise<void> {
   }
 
   saveConfig(config);
-  console.log(`[reviewflux] project removed: ${repo}`);
+  console.log(`[reviewflux] repository removed: ${repo}`);
 }

@@ -8,7 +8,7 @@ import {
   buildDaemonCommand,
   type DaemonCommandDependencies,
 } from "../commands/daemon/index.js";
-import { buildProjectCommand } from "../commands/project/index.js";
+import { buildRepoCommand } from "../commands/repo/index.js";
 import { buildSetupCommand } from "../commands/setup/index.js";
 
 type ProgramCommandDependencies = {
@@ -19,7 +19,7 @@ export function buildProgram(
   dependencies: ProgramCommandDependencies = {},
 ): Command {
   return buildDaemonCommand(
-    buildProjectCommand(
+    buildRepoCommand(
       buildSetupCommand(
         configureHelp(
           new Command().name(PROGRAM_NAME).description(PROGRAM_DESCRIPTION),
