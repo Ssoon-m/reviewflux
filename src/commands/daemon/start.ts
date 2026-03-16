@@ -233,13 +233,13 @@ export async function runDaemonStartCommand(
 
   if (projects.length === 0) {
     console.log(
-      "[reviewflux] no projects configured. run: reviewflux project add",
+      "[reviewflux] no repositories configured. run: reviewflux repo add",
     );
     logDaemonEvent({
       event: "daemon_no_projects",
       type: "lifecycle",
       level: "info",
-      message: "No projects configured for daemon",
+      message: "No repositories configured for daemon",
       context: { projectCount: 0 },
     });
     return;
@@ -248,7 +248,9 @@ export async function runDaemonStartCommand(
   await requireGhReady();
 
   console.log(`[reviewflux] gh polling mode enabled (${POLL_INTERVAL_MS}ms)`);
-  console.log(`[reviewflux] tracking ${projects.length} project(s)`);
+  console.log(
+    `[reviewflux] tracking ${projects.length} ${projects.length === 1 ? "repository" : "repositories"}`,
+  );
   for (const project of projects) {
     const modelValue = project.model
       ? `${project.model.provider}/${project.model.model}`

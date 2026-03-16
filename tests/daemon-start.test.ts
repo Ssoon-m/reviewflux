@@ -309,7 +309,7 @@ describe("daemon start cycle", () => {
       expect(logSpy.mock.calls.map(([message]) => message)).toEqual([
         "[reviewflux] daemon start",
         "[reviewflux] gh polling mode enabled (30000ms)",
-        "[reviewflux] tracking 1 project(s)",
+        "[reviewflux] tracking 1 repository",
         "- a/repo | mode=on_push | model=gpt-5.4 | context=default:AGENTS.md",
         "[reviewflux] force command is always enabled: @reviewflux",
         `[reviewflux] queue database: ${reviewQueuePath(home)}`,
@@ -390,7 +390,7 @@ describe("daemon start cycle", () => {
       expect(runCycle).not.toHaveBeenCalled();
       expect(logSpy.mock.calls.map(([message]) => message)).toEqual([
         "[reviewflux] daemon start",
-        "[reviewflux] no projects configured. run: reviewflux project add",
+        "[reviewflux] no repositories configured. run: reviewflux repo add",
       ]);
 
       expect(readDaemonLog(home, "2026-03-14")).toEqual([
@@ -401,7 +401,7 @@ describe("daemon start cycle", () => {
           type: "lifecycle",
           level: "info",
           event: "daemon_no_projects",
-          message: "No projects configured for daemon",
+          message: "No repositories configured for daemon",
           context: { projectCount: 0 },
         },
       ]);
@@ -486,7 +486,7 @@ describe("daemon start cycle", () => {
       expect(logSpy.mock.calls.map(([message]) => message)).toEqual([
         "[reviewflux] daemon start",
         "[reviewflux] gh polling mode enabled (30000ms)",
-        "[reviewflux] tracking 1 project(s)",
+        "[reviewflux] tracking 1 repository",
         "- a/repo | mode=on_push | model=gpt-5.4 | context=default:AGENTS.md",
         "[reviewflux] force command is always enabled: @reviewflux",
         `[reviewflux] queue database: ${reviewQueuePath(home)}`,
@@ -554,7 +554,7 @@ describe("daemon start cycle", () => {
       expect(logSpy.mock.calls.map(([message]) => message)).toEqual([
         "[reviewflux] daemon start",
         "[reviewflux] gh polling mode enabled (30000ms)",
-        "[reviewflux] tracking 1 project(s)",
+        "[reviewflux] tracking 1 repository",
         "- a/repo | mode=on_push | model=gpt-5.4 | context=default:AGENTS.md",
         "[reviewflux] force command is always enabled: @reviewflux",
         `[reviewflux] queue database: ${reviewQueuePath(home)}`,
@@ -648,7 +648,7 @@ describe("daemon start cycle", () => {
       expect(logSpy.mock.calls.map(([message]) => message)).toEqual([
         "[reviewflux] daemon start",
         "[reviewflux] gh polling mode enabled (30000ms)",
-        "[reviewflux] tracking 1 project(s)",
+        "[reviewflux] tracking 1 repository",
         "- a/repo | mode=on_push | model=gpt-5.4 | context=default:AGENTS.md",
         "[reviewflux] force command is always enabled: @reviewflux",
         `[reviewflux] queue database: ${reviewQueuePath(home)}`,
@@ -663,7 +663,7 @@ describe("daemon start cycle", () => {
       expect(logSpy.mock.calls.map(([message]) => message)).toEqual([
         "[reviewflux] daemon start",
         "[reviewflux] gh polling mode enabled (30000ms)",
-        "[reviewflux] tracking 1 project(s)",
+        "[reviewflux] tracking 1 repository",
         "- a/repo | mode=on_push | model=gpt-5.4 | context=default:AGENTS.md",
         "[reviewflux] force command is always enabled: @reviewflux",
         `[reviewflux] queue database: ${reviewQueuePath(home)}`,
@@ -751,7 +751,7 @@ describe("daemon start cycle", () => {
       expect(logSpy.mock.calls.map(([message]) => message)).toEqual([
         "[reviewflux] daemon start",
         "[reviewflux] gh polling mode enabled (30000ms)",
-        "[reviewflux] tracking 1 project(s)",
+        "[reviewflux] tracking 1 repository",
         "- a/repo | mode=on_push | model=gpt-5.4 | context=default:AGENTS.md",
         "[reviewflux] force command is always enabled: @reviewflux",
         `[reviewflux] queue database: ${reviewQueuePath(home)}`,
@@ -766,7 +766,7 @@ describe("daemon start cycle", () => {
       expect(logSpy.mock.calls.map(([message]) => message)).toEqual([
         "[reviewflux] daemon start",
         "[reviewflux] gh polling mode enabled (30000ms)",
-        "[reviewflux] tracking 1 project(s)",
+        "[reviewflux] tracking 1 repository",
         "- a/repo | mode=on_push | model=gpt-5.4 | context=default:AGENTS.md",
         "[reviewflux] force command is always enabled: @reviewflux",
         `[reviewflux] queue database: ${reviewQueuePath(home)}`,

@@ -988,7 +988,7 @@ export function buildSetupCommand(
 /**
  * 1. PR 코드 diff
  * 2. REVIEWFLUX-AGENTS.md 파일에 있는 내용을 참고하여 코드 리뷰를 시작해야함
- * 3. 유저가 project add 를 통해 선택한 AGENTS.md 파일에 있는 내용도 같이 참고해서 코드리뷰를 해야함 (유저 프로젝트의 코드 컨벤션 등이 담긴 AGENTS.md 파일)
+* 3. 유저가 repo add 를 통해 선택한 AGENTS.md 파일에 있는 내용도 같이 참고해서 코드리뷰를 해야함 (유저 저장소의 코드 컨벤션 등이 담긴 AGENTS.md 파일)
  * 4. 코드리뷰에 대한 결과를 뽑는데, 리뷰 결과는 JSON 형식으로 뽑아야함
  * 5. {line, path, body} 형식으로 나와야 하는데 line과 path는 코드 diff에 있는 내용을 참고해서 뽑아야함 
  * 6. line과 path를 뽑는 이유는 github에서 코드 리뷰를 할 때, 코드 리뷰를 하는 라인과 파일 경로를 명시해야 하기 때문입니다.
