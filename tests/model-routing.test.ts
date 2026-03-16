@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ModelRouter, resolveModel, type RoutingConfig } from "../src/llm/model-routing.js";
-import { normalizeRepoKey } from "../src/project/input.js";
+import { normalizeRepoKey } from "../src/lib/repo/input.js";
 
 describe("model routing", () => {
   const config: RoutingConfig = {

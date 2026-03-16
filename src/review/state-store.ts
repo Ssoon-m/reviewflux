@@ -1,5 +1,5 @@
 import { homedir } from "node:os";
-import { normalizeRepoKey } from "../project/input.js";
+import { normalizeRepoKey } from "../lib/repo/input.js";
 import { ReviewQueueDatabase } from "./queue/database.js";
 
 export type ProjectReviewState = {

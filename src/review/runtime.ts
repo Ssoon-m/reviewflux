@@ -24,7 +24,7 @@ import {
   buildReviewSystemPrompt,
   buildReviewUserPrompt,
 } from "../llm/review-prompt.js";
-import { normalizeRepoKey } from "../project/input.js";
+import { normalizeRepoKey } from "../lib/repo/input.js";
 import { createFindingFingerprint } from "./finding-fingerprint.js";
 import {
   buildRemoteProjectContextText,
