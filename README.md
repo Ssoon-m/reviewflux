@@ -37,8 +37,8 @@ pnpm build
 # Setup (default auth + creates config files)
 reviewflux setup
 
-# Add a project to track
-reviewflux project add
+# Add a repository to track
+reviewflux repo add
 
 # Start the daemon
 reviewflux daemon start

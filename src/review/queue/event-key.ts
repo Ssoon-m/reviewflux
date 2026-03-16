@@ -1,4 +1,4 @@
-import { normalizeRepoKey } from "../../project/input.js";
+import { normalizeRepoKey } from "../../lib/repo/input.js";
 import type { ManualReviewTrigger } from "../manual-trigger.js";
 import type { ReviewTriggerReason } from "../types.js";
 
@@ -22,4 +22,3 @@ export function buildManualReviewEventKey(
 ): string {
   return `${trigger.eventName}:${trigger.commentId}`;
 }
-

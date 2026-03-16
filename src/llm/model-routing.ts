@@ -1,4 +1,4 @@
-import { normalizeRepoKey } from "../project/input.js";
+import { normalizeRepoKey } from "../lib/repo/input.js";
 
 export type LlmProviderId = "openai-codex" | "openai" | "google" | "anthropic";
 

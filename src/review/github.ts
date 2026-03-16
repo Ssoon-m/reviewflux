@@ -8,7 +8,7 @@ import {
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { buildProjectContextText, pickContextFilePaths, resolveContextPatterns, type ContextFile } from "../llm/project-context.js";
-import { normalizeRepoKey } from "../project/input.js";
+import { normalizeRepoKey } from "../lib/repo/input.js";
 import { type InlineReviewComment } from "../gateway/review-publisher.js";
 import type {
   IssueComment,
@@ -148,7 +148,7 @@ export async function fetchRepoFileContent(
   const response = await ghApiJson<GitHubContentsFile | GitHubContentsFile[]>(
     `repos/${owner}/${name}/contents/${encodedPath}?ref=${encodeURIComponent(ref)}`,
   );
-  if (Array.isArray(response) || response.type !== "file") return null;
+  if (Array.isArray(response) || response.type !== "file") return null; 
   if (response.encoding !== "base64" || !response.content) return null;
   return Buffer.from(response.content.replaceAll("\n", ""), "base64").toString(
     "utf8",

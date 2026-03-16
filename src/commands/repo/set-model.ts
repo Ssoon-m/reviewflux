@@ -1,10 +1,10 @@
 import { promptSelect, promptText } from "../../cli/clack-prompter.js";
 import { loadConfig, saveConfig, type ReviewFluxConfig } from "../../cli/config.js";
-import { normalizeRepoInput } from "../../project/input.js";
+import { normalizeRepoInput } from "../../lib/repo/input.js";
 import { getSelectableModelsForProvider } from "../../llm/provider-catalog.js";
-import { ensureProviderCredentials, pickProjectProvider } from "./shared.js";
+import { ensureProviderCredentials, pickRepoProvider } from "./shared.js";
 
-function resolveLegacyProjectModel(params: {
+function resolveLegacyRepoModel(params: {
   config: ReviewFluxConfig;
   modelAlias?: string;
 }): { provider: string; model: string } | undefined {
@@ -12,22 +12,22 @@ function resolveLegacyProjectModel(params: {
   return params.config.modelAliases?.[params.modelAlias];
 }
 
-async function pickProjectModel(
+async function pickRepoModel(
   config: ReviewFluxConfig,
   currentModel?: { provider: string; model: string },
 ): Promise<{ provider: string; model: string } | undefined> {
-  const mode = await promptSelect<"__default__" | "__project__">({
-    message: "Set project model",
+  const mode = await promptSelect<"__default__" | "__repo__">({
+    message: "Set repository model",
     options: [
       { label: "Use default model", value: "__default__" },
-      { label: "Select project model", value: "__project__" },
+      { label: "Select repository model", value: "__repo__" },
     ],
-    initialValue: currentModel ? "__project__" : "__default__",
+    initialValue: currentModel ? "__repo__" : "__default__",
   });
 
   if (mode === "__default__") return undefined;
 
-  const selectedProvider = await pickProjectProvider(currentModel?.provider ?? config.llm);
+  const selectedProvider = await pickRepoProvider(currentModel?.provider ?? config.llm);
   await ensureProviderCredentials(config, selectedProvider);
 
   const models = getSelectableModelsForProvider(selectedProvider);
@@ -41,7 +41,7 @@ async function pickProjectModel(
         : models[0]?.id;
 
   const selectedModel = await promptSelect<string>({
-    message: "Select project model",
+    message: "Select repository model",
     options: models.map((model) => ({ label: `${model.id} (${model.name})`, value: model.id })),
     initialValue: initialModel,
   });
@@ -53,7 +53,7 @@ async function pickProjectModel(
   };
 }
 
-export async function runProjectSetModelCommand(): Promise<void> {
+export async function runRepoSetModelCommand(): Promise<void> {
   const config = loadConfig();
 
   const repoInput = await promptText({
@@ -62,28 +62,28 @@ export async function runProjectSetModelCommand(): Promise<void> {
   });
   const repo = normalizeRepoInput(repoInput);
 
-  const projects = { ...(config.projects ?? {}) };
-  const target = projects[repo];
-  if (!target) throw new Error(`project_not_found:${repo}`);
+  const repoConfigs = { ...(config.projects ?? {}) };
+  const target = repoConfigs[repo];
+  if (!target) throw new Error(`repo_not_found:${repo}`);
 
-  const currentModel = target.model ?? resolveLegacyProjectModel({ config, modelAlias: target.modelAlias });
-  const projectModel = await pickProjectModel(config, currentModel);
-  const nextProject = {
+  const currentModel = target.model ?? resolveLegacyRepoModel({ config, modelAlias: target.modelAlias });
+  const repoModel = await pickRepoModel(config, currentModel);
+  const nextRepo = {
     ...target,
-    ...(projectModel ? { model: projectModel } : {}),
+    ...(repoModel ? { model: repoModel } : {}),
   };
-  if (projectModel) {
-    delete nextProject.modelAlias;
+  if (repoModel) {
+    delete nextRepo.modelAlias;
   }
-  if (!projectModel) {
-    delete nextProject.model;
-    delete nextProject.modelAlias;
+  if (!repoModel) {
+    delete nextRepo.model;
+    delete nextRepo.modelAlias;
   }
-  projects[repo] = nextProject;
+  repoConfigs[repo] = nextRepo;
 
-  config.projects = projects;
+  config.projects = repoConfigs;
   saveConfig(config);
 
-  console.log(`[reviewflux] project model updated: ${repo}`);
-  console.log(`[reviewflux] model: ${projectModel ? `${projectModel.provider}/${projectModel.model}` : "<default>"}`);
+  console.log(`[reviewflux] repository model updated: ${repo}`);
+  console.log(`[reviewflux] model: ${repoModel ? `${repoModel.provider}/${repoModel.model}` : "<default>"}`);
 }

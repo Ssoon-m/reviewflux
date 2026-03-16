@@ -3,32 +3,32 @@ import { loadConfig, saveConfig, type ReviewFluxConfig } from "../../cli/config.
 import {
   normalizeRepoInput,
   type PrReviewMode,
-} from "../../project/input.js";
+} from "../../lib/repo/input.js";
 import { getSelectableModelsForProvider } from "../../llm/provider-catalog.js";
-import { ensureProviderCredentials, pickProjectProvider } from "./shared.js";
+import { ensureProviderCredentials, pickRepoProvider } from "./shared.js";
 
-async function resolveProjectModelSelection(
+async function resolveRepoModelSelection(
   config: ReviewFluxConfig,
 ): Promise<{ provider: string; model: string } | undefined> {
-  const mode = await promptSelect<"__default__" | "__project__">({
-    message: "Project model",
+  const mode = await promptSelect<"__default__" | "__repo__">({
+    message: "Repository model",
     options: [
       { label: "Use default model", value: "__default__" },
-      { label: "Select project model", value: "__project__" },
+      { label: "Select repository model", value: "__repo__" },
     ],
     initialValue: "__default__",
   });
 
   if (mode === "__default__") return undefined;
 
-  const selectedProvider = await pickProjectProvider(config.llm);
+  const selectedProvider = await pickRepoProvider(config.llm);
   await ensureProviderCredentials(config, selectedProvider);
 
   const models = getSelectableModelsForProvider(selectedProvider);
   if (models.length === 0) return undefined;
 
   const selectedModel = await promptSelect<string>({
-    message: "Select project model",
+    message: "Select repository model",
     options: models.map((model) => ({ label: `${model.id} (${model.name})`, value: model.id })),
     initialValue: selectedProvider === config.llm ? (config.model ?? models[0]?.id) : models[0]?.id,
   });
@@ -43,7 +43,7 @@ async function resolveProjectModelSelection(
   };
 }
 
-export async function runProjectAddCommand(): Promise<void> {
+export async function runRepoAddCommand(): Promise<void> {
   const config = loadConfig();
 
   const repoInput = await promptText({
@@ -81,12 +81,12 @@ export async function runProjectAddCommand(): Promise<void> {
           .filter(Boolean)
       : undefined;
 
-  const projectModel = await resolveProjectModelSelection(config);
+  const repoModel = await resolveRepoModelSelection(config);
 
-  const projects = { ...(config.projects ?? {}) };
-  projects[repo] = {
+  const repoConfigs = { ...(config.projects ?? {}) };
+  repoConfigs[repo] = {
     repo,
-    ...(projectModel ? { model: projectModel } : {}),
+    ...(repoModel ? { model: repoModel } : {}),
     pr: {
       mode,
       forceCommand: "@reviewflux",
@@ -100,20 +100,20 @@ export async function runProjectAddCommand(): Promise<void> {
         : { mode: "default" },
   };
 
-  config.projects = projects;
+  config.projects = repoConfigs;
   saveConfig(config);
 
-  console.log(`[reviewflux] project added: ${repo}`);
+  console.log(`[reviewflux] repository added: ${repo}`);
   console.log(`[reviewflux] pr mode: ${mode}`);
   if (contextMode === "default") {
     console.log("[reviewflux] context: AGENTS.md");
   } else {
     console.log(`[reviewflux] context: ${(customPatterns ?? ["AGENTS.md"]).join(", ")}`);
   }
-  if (projectModel) {
-    console.log(`[reviewflux] project model: ${projectModel.provider}/${projectModel.model}`);
+  if (repoModel) {
+    console.log(`[reviewflux] repository model: ${repoModel.provider}/${repoModel.model}`);
   } else {
-    console.log("[reviewflux] project model: <default>");
+    console.log("[reviewflux] repository model: <default>");
   }
   console.log("[reviewflux] force command is always enabled: @reviewflux");
 }

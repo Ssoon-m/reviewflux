@@ -11,7 +11,7 @@ import {
   groupKeyOfProvider,
 } from "../../llm/provider-catalog.js";
 
-export async function pickProjectProvider(initialProvider: string): Promise<string> {
+export async function pickRepoProvider(initialProvider: string): Promise<string> {
   const groups = getProviderGroupsForSelection();
   const initialGroupKey = groupKeyOfProvider(initialProvider);
   const defaultGroupKey = groups.some((group) => group.groupKey === initialGroupKey)
