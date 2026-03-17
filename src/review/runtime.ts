@@ -11,6 +11,10 @@ import {
   saveConfig,
 } from "../cli/config.js";
 import {
+  ensureReviewCommentTitle,
+  REVIEW_COMMENT_TITLE,
+} from "../contracts/review-comment-format.js";
+import {
   createPostedReviewKey,
   hasPostedReviewKey,
 } from "../gateway/review-key.js";
@@ -57,7 +61,6 @@ import type {
   ReviewTriggerReason,
 } from "./types.js";
 
-const REVIEW_TITLE = "🧠 ReviewFlux Review";
 const MAX_GLOBAL_AGENTS_CHARS = 6000;
 const MAX_BASE_POLICY_CHARS = 6000;
 const BASE_POLICY_FILE = "REVIEWFLUX-AGENTS.md";
@@ -130,10 +133,7 @@ function isAutomaticReviewReason(reason: ReviewTriggerReason): boolean {
 }
 
 function buildPostedReviewBody(body: string): string {
-  const trimmed = body.trim();
-  if (!trimmed) return REVIEW_TITLE;
-  if (trimmed.startsWith(REVIEW_TITLE)) return trimmed;
-  return `${REVIEW_TITLE}\n\n${trimmed}`;
+  return ensureReviewCommentTitle(body);
 }
 
 function buildNoNewFindingBody(): string {
@@ -176,7 +176,7 @@ async function loadExistingFindingFingerprints(
 
   for (const comment of [...issueComments, ...reviewComments]) {
     const body = typeof comment.body === "string" ? comment.body : "";
-    if (!body.includes(REVIEW_TITLE)) continue;
+    if (!body.includes(REVIEW_COMMENT_TITLE)) continue;
     const fingerprint = createFindingFingerprint(body);
     if (fingerprint.length > 0) {
       fingerprints.add(fingerprint);

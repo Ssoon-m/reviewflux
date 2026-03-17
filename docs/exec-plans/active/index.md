@@ -1,5 +1,3 @@
 # Active Execution Plans
 
-No active execution plans are tracked here yet.
-
-When a change is large enough to need a staged rollout, add the plan document in this directory and add it to this index.
+- `docs/exec-plans/active/layered-domain-architecture-and-review-format-contract.md` - Align architecture framing with layered domain terminology and extract the review comment wrapper into an explicit shared contract.

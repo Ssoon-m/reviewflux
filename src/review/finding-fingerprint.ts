@@ -1,15 +1,7 @@
-const REVIEW_TITLE = "🧠 ReviewFlux Review";
+import { stripReviewCommentTitle } from "../contracts/review-comment-format.js";
 
 function normalizeText(value: string): string {
   return value.replace(/\s+/g, " ").trim().toLowerCase();
-}
-
-function stripReviewTitle(body: string): string {
-  const trimmed = body.trim();
-  if (!trimmed.startsWith(REVIEW_TITLE)) return trimmed;
-
-  const remainder = trimmed.slice(REVIEW_TITLE.length);
-  return remainder.replace(/^\s+/, "").trim();
 }
 
 function extractSection(body: string, heading: string): string {
@@ -31,7 +23,7 @@ function extractDetailLines(findingsSection: string): string[] {
 }
 
 export function createFindingFingerprint(body: string): string {
-  const content = stripReviewTitle(body);
+  const content = stripReviewCommentTitle(body);
   if (!content) return "";
 
   const summary = normalizeText(extractSection(content, "### Summary"));

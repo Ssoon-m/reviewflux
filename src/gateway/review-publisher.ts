@@ -1,3 +1,8 @@
+import {
+  ensureReviewCommentTitle,
+  stripReviewCommentTitle,
+} from "../contracts/review-comment-format.js";
+
 export type ReviewFinding = {
   path: string;
   line: number | "";
@@ -37,8 +42,6 @@ export type ReviewPublisherAdapter = {
   ): Promise<void>;
 };
 
-const REVIEW_TITLE = "🧠 ReviewFlux Review";
-
 function isInlineReviewComment(
   finding: ReviewFinding,
 ): finding is InlineReviewComment {
@@ -54,23 +57,8 @@ function buildNoIssueBody(): string {
   return "Great news - no actionable issues were found in this PR. 👍";
 }
 
-function stripLeadingReviewTitle(body: string): string {
-  const trimmed = body.trim();
-  if (!trimmed.startsWith(REVIEW_TITLE)) return trimmed;
-
-  const remainder = trimmed.slice(REVIEW_TITLE.length);
-  return remainder.replace(/^\s+/, "").trim();
-}
-
 function buildPostedCommentBody(body: string): string {
-  const content = stripLeadingReviewTitle(body);
-  const parts = [REVIEW_TITLE];
-
-  if (content.length > 0) {
-    parts.push("", content);
-  }
-
-  return parts.join("\n").trim();
+  return ensureReviewCommentTitle(body);
 }
 
 function buildTopLevelCommentBodies(findings: ReviewFinding[]): string[] {
@@ -79,7 +67,7 @@ function buildTopLevelCommentBodies(findings: ReviewFinding[]): string[] {
   }
 
   const blocks = findings
-    .map((finding) => stripLeadingReviewTitle(finding.body))
+    .map((finding) => stripReviewCommentTitle(finding.body))
     .filter((body) => body.length > 0);
   if (blocks.length === 0) {
     return [buildPostedCommentBody(buildNoIssueBody())];
