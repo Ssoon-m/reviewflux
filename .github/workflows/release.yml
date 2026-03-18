@@ -2,16 +2,15 @@ name: Release
 
 on:
   push:
-    branches:
-      - main
+    tags:
+      - "v*"
 
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
 
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
   id-token: write
 
 jobs:
@@ -39,20 +38,50 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Validate release tag
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          PACKAGE_VERSION=$(node -p "require('./package.json').version")
+          TAG_VERSION="${RELEASE_TAG#v}"
+
+          if [[ "${TAG_VERSION}" != "${PACKAGE_VERSION}" ]]; then
+            echo "Release tag ${RELEASE_TAG} does not match package version ${PACKAGE_VERSION}."
+            exit 1
+          fi
+
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+
+          if ! git merge-base --is-ancestor "${GITHUB_SHA}" origin/main; then
+            echo "Release tag ${RELEASE_TAG} must point to a commit on main."
+            exit 1
+          fi
+
+      - name: Ensure version is not already published
+        run: |
+          set -euo pipefail
+          PACKAGE_VERSION=$(node -p "require('./package.json').version")
+
+          if npm view "reviewflux@${PACKAGE_VERSION}" version >/dev/null 2>&1; then
+            echo "reviewflux@${PACKAGE_VERSION} is already published on npm."
+            exit 1
+          fi
+
       - name: Validate release
         run: pnpm test:all
 
       - name: Verify package contents
         run: npm pack --dry-run --json
 
-      - name: Create release PR or publish
-        uses: changesets/action@v1
-        with:
-          commit: "chore: release package"
-          title: "chore: release package"
-          version: pnpm version-packages
-          publish: pnpm release
+      - name: Publish package
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-          NPM_CONFIG_PROVENANCE: true
+        run: |
+          set -euo pipefail
+
+          if [[ -n "${NODE_AUTH_TOKEN:-}" ]]; then
+            npm publish --provenance
+          else
+            npm publish
+          fi

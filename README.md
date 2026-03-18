@@ -93,12 +93,20 @@ rvw daemon start
 ```bash
 # 1. Record the version intent in the feature branch
 pnpm changeset
+
+# 2. Prepare the release commit when you are ready
+pnpm version-packages
 ```
 
-Merge that PR into `main`. The release workflow will open or update a release PR with the version and changelog changes.
+Merge the version bump commit into `main`, then create a tag that matches `package.json#version`.
 
-When the release PR is merged, GitHub Actions will run the release checks and publish the package to npm.
+```bash
+git tag v0.1.1
+git push origin v0.1.1
+```
 
-Set the repository `NPM_TOKEN` secret before relying on the workflow publish step.
+GitHub Actions will validate that the tag version matches `package.json`, confirm the tag commit is on `main`, run the release checks, and publish to npm.
 
-If you need a local fallback instead of the workflow, run `pnpm version-packages`, review the generated changes, then run `pnpm release`. That local publish path requires npm publish credentials that satisfy your package's 2FA policy.
+Configure npm trusted publishing for `.github/workflows/release.yml`, or set the repository `NPM_TOKEN` secret if you want the workflow to publish with a token.
+
+If you need a local fallback instead of the workflow, run `pnpm release` after `pnpm version-packages`. That local publish path requires npm publish credentials that satisfy your package's 2FA policy.
