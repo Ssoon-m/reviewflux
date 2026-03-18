@@ -12,7 +12,7 @@ module.exports = {
     {
       name: "no-cross-cutting-to-domains",
       comment:
-        "Cross-cutting boundaries must stay leaf-like and must not depend on higher-level domain behavior.",
+        "Files under src/contracts, src/config, src/infra/logging, src/lib, and src/types must not import higher-level domain behavior.",
       severity: "error",
       from: {
         path: "^src/(contracts|config|infra/logging|lib|types)(?:/|$)",
