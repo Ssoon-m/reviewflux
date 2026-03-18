@@ -60,6 +60,12 @@ describe("review queue storage", () => {
       const reviewJobColumns = database.connection
         .prepare(`PRAGMA table_info(review_jobs)`)
         .all() as Array<{ name: string }>;
+      const pollStateColumns = database.connection
+        .prepare(`PRAGMA table_info(project_poll_state)`)
+        .all() as Array<{ name: string }>;
+      const prStateColumns = database.connection
+        .prepare(`PRAGMA table_info(project_pr_heads)`)
+        .all() as Array<{ name: string }>;
 
       expect(journalMode.toLowerCase()).toBe("wal");
       expect(foreignKeys).toBe(1);
@@ -68,6 +74,21 @@ describe("review queue storage", () => {
       expect(schemaVersion?.value).toBe(String(REVIEW_QUEUE_SCHEMA_VERSION));
       expect(reviewJobColumns.map((column) => column.name)).toEqual(
         expect.arrayContaining(["worker_id", "heartbeat_at"]),
+      );
+      expect(pollStateColumns.map((column) => column.name)).toEqual(
+        expect.arrayContaining([
+          "last_manual_backstop_at",
+          "next_manual_backstop_at",
+        ]),
+      );
+      expect(prStateColumns.map((column) => column.name)).toEqual(
+        expect.arrayContaining([
+          "last_seen_updated_at",
+          "last_seen_issue_comment_id",
+          "last_seen_review_comment_id",
+          "last_targeted_refresh_at",
+          "next_targeted_refresh_at",
+        ]),
       );
     } finally {
       database.close();
@@ -167,7 +188,18 @@ describe("review queue storage", () => {
         initialized: true,
         lastSeenIssueCommentId: 10,
         lastSeenReviewCommentId: 20,
-        prHeads: { "13": "headsha" },
+        lastManualBackstopAt: "2026-03-12T00:00:00.000Z",
+        nextManualBackstopAt: "2026-03-12T00:10:00.000Z",
+        prStates: {
+          "13": {
+            headSha: "headsha",
+            lastSeenUpdatedAt: "2026-03-11T23:59:00.000Z",
+            lastSeenIssueCommentId: 8,
+            lastSeenReviewCommentId: 18,
+            lastTargetedRefreshAt: "2026-03-12T00:00:00.000Z",
+            nextTargetedRefreshAt: "2026-03-12T00:00:30.000Z",
+          },
+        },
       });
 
       expect(pollStateStore.loadProject("ssoon-m/reviewflux")).toEqual({
@@ -175,7 +207,18 @@ describe("review queue storage", () => {
         initialized: true,
         lastSeenIssueCommentId: 10,
         lastSeenReviewCommentId: 20,
-        prHeads: { "13": "headsha" },
+        lastManualBackstopAt: "2026-03-12T00:00:00.000Z",
+        nextManualBackstopAt: "2026-03-12T00:10:00.000Z",
+        prStates: {
+          "13": {
+            headSha: "headsha",
+            lastSeenUpdatedAt: "2026-03-11T23:59:00.000Z",
+            lastSeenIssueCommentId: 8,
+            lastSeenReviewCommentId: 18,
+            lastTargetedRefreshAt: "2026-03-12T00:00:00.000Z",
+            nextTargetedRefreshAt: "2026-03-12T00:00:30.000Z",
+          },
+        },
       });
 
       const availableAt = "2026-03-12T00:00:00.000Z";

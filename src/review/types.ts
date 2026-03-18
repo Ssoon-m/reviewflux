@@ -8,6 +8,7 @@ export type PullRequestSummary = {
   number: number;
   title: string;
   body?: string;
+  updated_at?: string;
   head: { sha: string };
 };
 

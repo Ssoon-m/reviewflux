@@ -40,10 +40,21 @@ export type ReviewJobRecord = {
   updatedAt: string;
 };
 
+export type ProjectPullRequestPollState = {
+  headSha: string;
+  lastSeenUpdatedAt: string | null;
+  lastSeenIssueCommentId: number | null;
+  lastSeenReviewCommentId: number | null;
+  lastTargetedRefreshAt: string | null;
+  nextTargetedRefreshAt: string | null;
+};
+
 export type ProjectPollSnapshot = {
   repoKey: string;
   initialized: boolean;
   lastSeenIssueCommentId: number | null;
   lastSeenReviewCommentId: number | null;
-  prHeads: Record<string, string>;
+  lastManualBackstopAt: string | null;
+  nextManualBackstopAt: string | null;
+  prStates: Record<string, ProjectPullRequestPollState>;
 };

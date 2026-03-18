@@ -1,6 +1,6 @@
 type BetterSqlite3Database = import("better-sqlite3").Database;
 
-export const REVIEW_QUEUE_SCHEMA_VERSION = 2;
+export const REVIEW_QUEUE_SCHEMA_VERSION = 3;
 
 function hasColumn(
   db: BetterSqlite3Database,
@@ -45,6 +45,8 @@ export function bootstrapReviewQueueSchema(db: BetterSqlite3Database): void {
       initialized INTEGER NOT NULL DEFAULT 0,
       last_seen_issue_comment_id INTEGER,
       last_seen_review_comment_id INTEGER,
+      last_manual_backstop_at TEXT,
+      next_manual_backstop_at TEXT,
       updated_at TEXT NOT NULL
     );
 
@@ -52,6 +54,11 @@ export function bootstrapReviewQueueSchema(db: BetterSqlite3Database): void {
       repo_key TEXT NOT NULL,
       pr_number INTEGER NOT NULL,
       head_sha TEXT NOT NULL,
+      last_seen_updated_at TEXT,
+      last_seen_issue_comment_id INTEGER,
+      last_seen_review_comment_id INTEGER,
+      last_targeted_refresh_at TEXT,
+      next_targeted_refresh_at TEXT,
       updated_at TEXT NOT NULL,
       PRIMARY KEY (repo_key, pr_number)
     );
@@ -82,6 +89,13 @@ export function bootstrapReviewQueueSchema(db: BetterSqlite3Database): void {
 
   ensureColumn(db, "review_jobs", "worker_id", "TEXT");
   ensureColumn(db, "review_jobs", "heartbeat_at", "TEXT");
+  ensureColumn(db, "project_poll_state", "last_manual_backstop_at", "TEXT");
+  ensureColumn(db, "project_poll_state", "next_manual_backstop_at", "TEXT");
+  ensureColumn(db, "project_pr_heads", "last_seen_updated_at", "TEXT");
+  ensureColumn(db, "project_pr_heads", "last_seen_issue_comment_id", "INTEGER");
+  ensureColumn(db, "project_pr_heads", "last_seen_review_comment_id", "INTEGER");
+  ensureColumn(db, "project_pr_heads", "last_targeted_refresh_at", "TEXT");
+  ensureColumn(db, "project_pr_heads", "next_targeted_refresh_at", "TEXT");
 
   db.exec(`
     CREATE INDEX IF NOT EXISTS review_jobs_running_heartbeat_idx

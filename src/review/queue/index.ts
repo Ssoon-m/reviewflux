@@ -14,6 +14,7 @@ export { ReviewPollStateStore } from "./poll-state-store";
 export type {
   EnqueueReviewJobInput,
   ProjectPollSnapshot,
+  ProjectPullRequestPollState,
   ReviewJobPayload,
   ReviewJobRecord,
   ReviewJobStatus,
