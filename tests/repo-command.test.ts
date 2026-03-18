@@ -4,12 +4,12 @@ import {
   PROGRAM_DESCRIPTION,
   PROGRAM_NAME,
   configureHelp,
-} from "../src/commands/help/index.js";
+} from "../src/commands/help/index";
 import {
   buildRepoCommand,
   type RepoCommandHandlers,
-} from "../src/commands/repo/index.js";
-import { createCommanderTestHarness } from "./commander-test-harness.js";
+} from "../src/commands/repo/index";
+import { createCommanderTestHarness } from "./commander-test-harness";
 
 function createRepoHandlers(): RepoCommandHandlers {
   return {
@@ -68,7 +68,7 @@ describe("repo-command", () => {
 
     expect(error).toBeInstanceOf(CommanderError);
     expect((error as CommanderError).code).toBe("commander.help");
-    expect(stdout).toContain("Usage: reviewflux repo");
+    expect(stdout).toContain("Usage: rvw repo");
     expect(stdout).toContain("remove");
     expectNoRepoHandlersCalled(handlers);
   });
@@ -79,7 +79,7 @@ describe("repo-command", () => {
 
     expect(error).toBeInstanceOf(CommanderError);
     expect((error as CommanderError).code).toBe("commander.helpDisplayed");
-    expect(stdout).toContain("Usage: reviewflux repo add");
+    expect(stdout).toContain("Usage: rvw repo add");
     expect(stdout).toContain("add a repository to track");
     expectNoRepoHandlersCalled(handlers);
   });
@@ -91,7 +91,7 @@ describe("repo-command", () => {
     expect(error).toBeInstanceOf(CommanderError);
     expect((error as CommanderError).code).toBe("commander.unknownCommand");
     expect(stderr).toContain("error: unknown command 'nope'");
-    expect(stderr).toContain("Usage: reviewflux repo");
+    expect(stderr).toContain("Usage: rvw repo");
     expectNoRepoHandlersCalled(handlers);
   });
 });

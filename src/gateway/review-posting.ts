@@ -5,7 +5,7 @@ import {
   type PublishReviewContext,
   type ReviewFinding,
   type ReviewPublisherAdapter,
-} from "./review-publisher.js";
+} from "./review-publisher";
 
 type DiffLineIndex = Map<string, number[]>;
 

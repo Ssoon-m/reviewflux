@@ -2,8 +2,8 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ReviewFluxConfig } from "../src/cli/config.js";
-import type { ReviewState } from "../src/review/state-store.js";
+import type { ReviewFluxConfig } from "../src/cli/config";
+import type { ReviewState } from "../src/review/state-store";
 
 const REVIEW_RUNTIME_LOG_TS = new Date("2026-03-16T01:02:03.000Z");
 const REVIEW_RUNTIME_LOG_DATE = "2026-03-16";
@@ -107,7 +107,7 @@ vi.mock("../src/review/github.js", () => ({
   postPullRequestReviewReply: mocks.postPullRequestReviewReplyMock,
 }));
 
-import { runReviewJob } from "../src/review/runtime.js";
+import { runReviewJob } from "../src/review/runtime";
 
 function buildFindingBody(summary: string, detail: string): string {
   return [

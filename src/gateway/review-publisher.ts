@@ -1,7 +1,7 @@
 import {
   ensureReviewCommentTitle,
   stripReviewCommentTitle,
-} from "../contracts/review-comment-format.js";
+} from "../contracts/review-comment-format";
 
 export type ReviewFinding = {
   path: string;

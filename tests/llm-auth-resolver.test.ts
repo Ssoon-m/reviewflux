@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { AppConfig } from "../src/config/env.js";
-import { resolveAuthInput } from "../src/llm/auth-resolver.js";
+import type { AppConfig } from "../src/config/env";
+import { resolveAuthInput } from "../src/llm/auth-resolver";
 
 function makeConfig(patch: Partial<AppConfig>): AppConfig {
   return {

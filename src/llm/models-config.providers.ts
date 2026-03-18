@@ -1,5 +1,5 @@
 import { getModels, getProviders } from "@mariozechner/pi-ai";
-import type { LlmProviderName } from "./types.js";
+import type { LlmProviderName } from "./types";
 
 /**
  * Model catalog and support checks depend only on pi-ai:

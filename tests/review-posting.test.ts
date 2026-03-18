@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { postReviewOutput } from "../src/gateway/review-posting.js";
+import { postReviewOutput } from "../src/gateway/review-posting";
 
 function makeParams(overrides: Partial<Parameters<typeof postReviewOutput>[0]> = {}) {
   return {

@@ -1,6 +1,6 @@
-import { OAuthTokenProvider } from "../auth/oauth-token-provider.js";
-import type { AppConfig } from "../config/env.js";
-import type { LlmProviderName } from "./types.js";
+import { OAuthTokenProvider } from "../auth/oauth-token-provider";
+import type { AppConfig } from "../config/env";
+import type { LlmProviderName } from "./types";
 
 function resolveApiKey(config: AppConfig, provider: LlmProviderName): string {
   const explicit = config.LLM_API_KEY?.trim();

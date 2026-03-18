@@ -1,5 +1,5 @@
 import { getModel, supportsXhigh } from "@mariozechner/pi-ai";
-import type { AuthMode, EffortLevel } from "../cli/config.js";
+import type { AuthMode, EffortLevel } from "../cli/config";
 
 const BASE_LEVELS: EffortLevel[] = ["low", "medium", "high"];
 

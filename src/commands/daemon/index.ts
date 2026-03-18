@@ -1,13 +1,13 @@
-import { Command } from "commander";
+import type { Command } from "commander";
 import {
   resolveCommandBuilderDependencies,
   type CommandBuilderDependencies,
-} from "../../cli/command-builder.js";
+} from "../../cli/command-builder";
 
-type RunDaemonStartCommand = (typeof import("./start.js"))["runDaemonStartCommand"];
-type RunDaemonStopCommand = (typeof import("./stop.js"))["runDaemonStopCommand"];
-type RunDaemonStatusCommand = (typeof import("./status.js"))["runDaemonStatusCommand"];
-type RunDaemonInstallCommand = (typeof import("./install.js"))["runDaemonInstallCommand"];
+type RunDaemonStartCommand = (typeof import("./start"))["runDaemonStartCommand"];
+type RunDaemonStopCommand = (typeof import("./stop"))["runDaemonStopCommand"];
+type RunDaemonStatusCommand = (typeof import("./status"))["runDaemonStatusCommand"];
+type RunDaemonInstallCommand = (typeof import("./install"))["runDaemonInstallCommand"];
 
 export type DaemonCommandHandlers = {
   runDaemonStartCommand: RunDaemonStartCommand;
@@ -21,22 +21,22 @@ export type DaemonCommandDependencies = CommandBuilderDependencies<
 >;
 
 export const runDaemonStartCommand: RunDaemonStartCommand = async (...args) => {
-  const module = await import("./start.js");
+  const module = await import("./start");
   await module.runDaemonStartCommand(...args);
 };
 
 export const runDaemonStopCommand: RunDaemonStopCommand = async (...args) => {
-  const module = await import("./stop.js");
+  const module = await import("./stop");
   await module.runDaemonStopCommand(...args);
 };
 
 export const runDaemonStatusCommand: RunDaemonStatusCommand = async (...args) => {
-  const module = await import("./status.js");
+  const module = await import("./status");
   await module.runDaemonStatusCommand(...args);
 };
 
 export const runDaemonInstallCommand: RunDaemonInstallCommand = async (...args) => {
-  const module = await import("./install.js");
+  const module = await import("./install");
   await module.runDaemonInstallCommand(...args);
 };
 

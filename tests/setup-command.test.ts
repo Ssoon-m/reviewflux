@@ -3,14 +3,14 @@ import { describe, expect, it, vi } from "vitest";
 import {
   buildSetupCommand,
   runSetupFlow,
-} from "../src/commands/setup/index.js";
-import { createCommanderTestHarness } from "./commander-test-harness.js";
+} from "../src/commands/setup/index";
+import { createCommanderTestHarness } from "./commander-test-harness";
 
 function createSetupHarness(runSetup = vi.fn(async () => {})) {
   return {
     runSetup,
     harness: createCommanderTestHarness(() => {
-      const program = new Command().name("reviewflux");
+      const program = new Command().name("rvw");
       program.showHelpAfterError();
       program.showSuggestionAfterError();
       return buildSetupCommand(program, { runSetup });
@@ -48,7 +48,7 @@ describe("setup-command", () => {
     expect(error).toBeInstanceOf(CommanderError);
     expect((error as CommanderError).code).toBe("commander.helpDisplayed");
     expect(runSetup).not.toHaveBeenCalled();
-    expect(stdout).toContain("Usage: reviewflux setup");
+    expect(stdout).toContain("Usage: rvw setup");
     expect(stdout).toContain("--advanced");
   });
 

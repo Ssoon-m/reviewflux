@@ -1,4 +1,4 @@
-import type { ChatInput } from "../types.js";
+import type { ChatInput } from "../types";
 
 type OpenAIProviderClientOptions = {
   baseUrl: string;

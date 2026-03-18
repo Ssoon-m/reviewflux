@@ -3,7 +3,7 @@ import {
   ensureReviewCommentTitle,
   REVIEW_COMMENT_TITLE,
   stripReviewCommentTitle,
-} from "../src/contracts/review-comment-format.js";
+} from "../src/contracts/review-comment-format";
 
 describe("review comment format contract", () => {
   it("adds the shared title wrapper exactly once", () => {

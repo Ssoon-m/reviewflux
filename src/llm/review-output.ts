@@ -1,4 +1,4 @@
-import { type ReviewFinding } from "../gateway/review-publisher.js";
+import { type ReviewFinding } from "../gateway/review-publisher";
 
 type StructuredReviewComment = {
   path?: unknown;
@@ -112,7 +112,7 @@ function sanitizeModelOutputForFallback(raw: string): string {
   return source
     .replace(/```json/gi, " ")
     .replace(/```/g, " ")
-    .replace(/[{}\[\]"]+/g, " ")
+    .replace(/[{}[\]"]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
 }

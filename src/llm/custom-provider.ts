@@ -34,7 +34,7 @@ export function normalizeCustomBaseUrl(raw: string): string {
     return trimmed;
   } catch (e) {
     if (e instanceof Error && e.message.startsWith("custom_provider")) throw e;
-    throw new Error("custom_provider_base_url_invalid");
+    throw new Error("custom_provider_base_url_invalid", { cause: e });
   }
 }
 

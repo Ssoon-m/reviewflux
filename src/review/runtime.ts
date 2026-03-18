@@ -3,33 +3,33 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { getModel } from "@mariozechner/pi-ai";
-import { apiKeyFromPiOAuth, refreshWithPiOAuth } from "../auth/pi-oauth.js";
+import { apiKeyFromPiOAuth, refreshWithPiOAuth } from "../auth/pi-oauth";
 import {
   getActiveAuthProfile,
   loadConfig,
   type ReviewFluxConfig,
   saveConfig,
-} from "../cli/config.js";
+} from "../cli/config";
 import {
   ensureReviewCommentTitle,
   REVIEW_COMMENT_TITLE,
-} from "../contracts/review-comment-format.js";
+} from "../contracts/review-comment-format";
 import {
   createPostedReviewKey,
   hasPostedReviewKey,
-} from "../gateway/review-key.js";
-import { postReviewOutput } from "../gateway/review-posting.js";
-import type { ReviewFinding } from "../gateway/review-publisher.js";
-import { logging } from "../infra/logging/index.js";
-import { createLlmProvider } from "../llm/factory.js";
-import { resolveCodexEffort } from "../llm/reasoning-effort.js";
-import { resolveReviewOutputFromModel } from "../llm/review-output.js";
+} from "../gateway/review-key";
+import { postReviewOutput } from "../gateway/review-posting";
+import type { ReviewFinding } from "../gateway/review-publisher";
+import { logging } from "../infra/logging/index";
+import { createLlmProvider } from "../llm/factory";
+import { resolveCodexEffort } from "../llm/reasoning-effort";
+import { resolveReviewOutputFromModel } from "../llm/review-output";
 import {
   buildReviewSystemPrompt,
   buildReviewUserPrompt,
-} from "../llm/review-prompt.js";
-import { normalizeRepoKey } from "../lib/repo/input.js";
-import { createFindingFingerprint } from "./finding-fingerprint.js";
+} from "../llm/review-prompt";
+import { normalizeRepoKey } from "../lib/repo/input";
+import { createFindingFingerprint } from "./finding-fingerprint";
 import {
   buildRemoteProjectContextText,
   fetchPullRequestDetail,
@@ -40,12 +40,12 @@ import {
   postInlineReviewComment,
   postPullRequestComment,
   postPullRequestReviewReply,
-} from "./github.js";
+} from "./github";
 import {
   buildHandledManualTriggerKey,
   canReplyInReviewThread,
   type ManualReviewTrigger,
-} from "./manual-trigger.js";
+} from "./manual-trigger";
 import {
   buildProjectReviewState,
   hasHandledManualTriggerKey,
@@ -54,12 +54,12 @@ import {
   saveReviewState,
   trackHandledManualTriggerKey,
   trackPostedReviewKey,
-} from "./state-store.js";
+} from "./state-store";
 import type {
   ProjectConfig,
   PullRequestDetail,
   ReviewTriggerReason,
-} from "./types.js";
+} from "./types";
 
 const MAX_GLOBAL_AGENTS_CHARS = 6000;
 const MAX_BASE_POLICY_CHARS = 6000;

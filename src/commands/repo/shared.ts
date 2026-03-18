@@ -1,15 +1,15 @@
 import { spawn, spawnSync } from "node:child_process";
-import { promptSelect } from "../../cli/clack-prompter.js";
-import { promptPassword, promptText } from "../../cli/clack-prompter.js";
+import { promptSelect } from "../../cli/clack-prompter";
+import { promptPassword, promptText } from "../../cli/clack-prompter";
 import { getOAuthProvider, getOAuthProviders } from "@mariozechner/pi-ai/oauth";
-import { loginWithPiOAuth, resolveOAuthProviderId } from "../../auth/pi-oauth.js";
-import { getActiveAuthProfile, type LlmProvider, type OAuthConfig, type ReviewFluxConfig } from "../../cli/config.js";
+import { loginWithPiOAuth, resolveOAuthProviderId } from "../../auth/pi-oauth";
+import { getActiveAuthProfile, type LlmProvider, type OAuthConfig, type ReviewFluxConfig } from "../../cli/config";
 import {
   getProviderChoiceHint,
   getProviderChoiceLabel,
   getProviderGroupsForSelection,
   groupKeyOfProvider,
-} from "../../llm/provider-catalog.js";
+} from "../../llm/provider-catalog";
 
 export async function pickRepoProvider(initialProvider: string): Promise<string> {
   const groups = getProviderGroupsForSelection();

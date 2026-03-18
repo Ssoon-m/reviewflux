@@ -1,5 +1,5 @@
-import type { ManualReviewTrigger } from "../manual-trigger.js";
-import type { ReviewTriggerReason } from "../types.js";
+import type { ManualReviewTrigger } from "../manual-trigger";
+import type { ReviewTriggerReason } from "../types";
 
 export type ReviewJobStatus = "pending" | "running" | "done" | "failed";
 

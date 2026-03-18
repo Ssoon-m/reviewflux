@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { AppConfig } from "../src/config/env.js";
-import { createLlmService } from "../src/llm/service.js";
+import type { AppConfig } from "../src/config/env";
+import { createLlmService } from "../src/llm/service";
 
 function makeConfig(patch: Partial<AppConfig>): AppConfig {
   return {

@@ -2,13 +2,13 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { ReviewFluxConfig } from "../src/cli/config.js";
+import type { ReviewFluxConfig } from "../src/cli/config";
 import {
   runDaemonCycle,
   runDaemonStartCommand,
-} from "../src/commands/daemon/start.js";
-import { reviewQueuePath } from "../src/review/queue/index.js";
-import type { ProjectConfig } from "../src/review/types.js";
+} from "../src/commands/daemon/start";
+import { reviewQueuePath } from "../src/review/queue/index";
+import type { ProjectConfig } from "../src/review/types";
 
 type DaemonLogRecord = {
   ts: string;
@@ -390,7 +390,7 @@ describe("daemon start cycle", () => {
       expect(runCycle).not.toHaveBeenCalled();
       expect(logSpy.mock.calls.map(([message]) => message)).toEqual([
         "[reviewflux] daemon start",
-        "[reviewflux] no repositories configured. run: reviewflux repo add",
+        "[reviewflux] no repositories configured. run: rvw repo add",
       ]);
 
       expect(readDaemonLog(home, "2026-03-14")).toEqual([

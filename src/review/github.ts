@@ -7,9 +7,9 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { buildProjectContextText, pickContextFilePaths, resolveContextPatterns, type ContextFile } from "../llm/project-context.js";
-import { normalizeRepoKey } from "../lib/repo/input.js";
-import { type InlineReviewComment } from "../gateway/review-publisher.js";
+import { buildProjectContextText, pickContextFilePaths, resolveContextPatterns, type ContextFile } from "../llm/project-context";
+import { normalizeRepoKey } from "../lib/repo/input";
+import { type InlineReviewComment } from "../gateway/review-publisher";
 import type {
   IssueComment,
   IssueInfo,
@@ -18,7 +18,7 @@ import type {
   PullRequestFile,
   PullRequestSummary,
   PullReviewComment,
-} from "./types.js";
+} from "./types";
 
 type GitTreeEntry = {
   path: string;

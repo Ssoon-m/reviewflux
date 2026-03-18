@@ -68,6 +68,8 @@ Current runtime flow for GitHub looks like this:
 npm install -g reviewflux@latest
 ```
 
+This installs the preferred `rvw` command and keeps `reviewflux` as a compatibility alias.
+
 > If `gh` is not installed yet, install GitHub CLI and run `gh auth login`
 
 ## Quick Start

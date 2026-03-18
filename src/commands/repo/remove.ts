@@ -1,6 +1,6 @@
-import { promptText } from "../../cli/clack-prompter.js";
-import { loadConfig, saveConfig } from "../../cli/config.js";
-import { normalizeRepoInput } from "../../lib/repo/input.js";
+import { promptText } from "../../cli/clack-prompter";
+import { loadConfig, saveConfig } from "../../cli/config";
+import { normalizeRepoInput } from "../../lib/repo/input";
 
 export async function runRepoRemoveCommand(): Promise<void> {
   const config = loadConfig();

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resolveReviewOutputFromModel } from "../src/llm/review-output.js";
+import { resolveReviewOutputFromModel } from "../src/llm/review-output";
 
 describe("review output normalization", () => {
   it("returns no findings for an empty findings array", () => {

@@ -3,8 +3,8 @@ import express from "express";
 import { realpathSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { readConfig } from "../config/env.js";
-import { createLlmService } from "../llm/service.js";
+import { readConfig } from "../config/env";
+import { createLlmService } from "../llm/service";
 
 export function parsePromptText(input: unknown): string | null {
   if (typeof input !== "string") return null;

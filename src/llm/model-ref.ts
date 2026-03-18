@@ -1,5 +1,5 @@
-import { normalizeProviderId } from "./provider-normalizer.js";
-import type { LlmProviderName } from "./types.js";
+import { normalizeProviderId } from "./provider-normalizer";
+import type { LlmProviderName } from "./types";
 
 export type ModelRef = {
   provider: LlmProviderName;

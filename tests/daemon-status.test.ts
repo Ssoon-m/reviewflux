@@ -2,12 +2,12 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { runDaemonStatusCommand } from "../src/commands/daemon/status.js";
+import { runDaemonStatusCommand } from "../src/commands/daemon/status";
 import {
   ReviewJobStore,
   ReviewQueueDatabase,
   reviewQueuePath,
-} from "../src/review/queue/index.js";
+} from "../src/review/queue/index";
 
 type DaemonLogRecord = {
   ts: string;

@@ -8,9 +8,9 @@ import {
   ReviewPollStateStore,
   ReviewQueueDatabase,
   reviewQueuePath,
-} from "../src/review/queue/index.js";
-import { REVIEW_QUEUE_SCHEMA_VERSION } from "../src/review/queue/schema.js";
-import { loadReviewState, saveReviewState } from "../src/review/state-store.js";
+} from "../src/review/queue/index";
+import { REVIEW_QUEUE_SCHEMA_VERSION } from "../src/review/queue/schema";
+import { loadReviewState, saveReviewState } from "../src/review/state-store";
 
 const require = createRequire(import.meta.url);
 const BetterSqlite3 = require("better-sqlite3") as typeof import("better-sqlite3");

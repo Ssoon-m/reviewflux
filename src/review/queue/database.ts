@@ -2,8 +2,8 @@ import { mkdirSync } from "node:fs";
 import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import { dirname } from "node:path";
-import { getReviewFluxPath } from "../../config/reviewflux-home.js";
-import { bootstrapReviewQueueSchema } from "./schema.js";
+import { getReviewFluxPath } from "../../config/reviewflux-home";
+import { bootstrapReviewQueueSchema } from "./schema";
 
 type BetterSqlite3Module = typeof import("better-sqlite3");
 type BetterSqlite3Database = import("better-sqlite3").Database;
@@ -31,6 +31,7 @@ function loadBetterSqlite3(): BetterSqlite3Module {
     const detail = error instanceof Error ? error.message : String(error);
     throw new Error(
       `Review queue storage requires better-sqlite3 support in this runtime. ${detail}`,
+      { cause: error },
     );
   }
 }
@@ -56,6 +57,7 @@ export function assertReviewQueueRuntimeSupported(): void {
     const detail = error instanceof Error ? error.message : String(error);
     throw new Error(
       `Review queue storage could not initialize SQLite support. ${detail}`,
+      { cause: error },
     );
   } finally {
     database?.close();

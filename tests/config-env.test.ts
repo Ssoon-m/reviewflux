@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { readConfig } from "../src/config/env.js";
+import { readConfig } from "../src/config/env";
 
 describe("readConfig model defaults", () => {
   it("defaults model based on provider", () => {

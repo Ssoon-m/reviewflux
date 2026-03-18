@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   runSetupFlow,
   type SetupFlowCollaborators,
-} from "../src/commands/setup/index.js";
+} from "../src/commands/setup/index";
 
 type SetupLogRecord = {
   ts: string;
@@ -221,7 +221,7 @@ describe("setup logging", () => {
         "[reviewflux] setup started",
         `[reviewflux] config directory: ${reviewFluxHome(home)}`,
         `[reviewflux] created global review guidance: ${join(reviewFluxHome(home), "AGENTS.md")}`,
-        "[reviewflux] setup skipped. Run reviewflux setup again when ready.",
+        "[reviewflux] setup skipped. Run rvw setup again when ready.",
       ]),
     );
   });

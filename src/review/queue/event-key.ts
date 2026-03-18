@@ -1,6 +1,6 @@
-import { normalizeRepoKey } from "../../lib/repo/input.js";
-import type { ManualReviewTrigger } from "../manual-trigger.js";
-import type { ReviewTriggerReason } from "../types.js";
+import { normalizeRepoKey } from "../../lib/repo/input";
+import type { ManualReviewTrigger } from "../manual-trigger";
+import type { ReviewTriggerReason } from "../types";
 
 export function buildAutomaticReviewEventKey(params: {
   repo: string;

@@ -2,9 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   buildReviewSystemPrompt,
   buildReviewUserPrompt,
-} from "../src/llm/review-prompt.js";
-import { hasPostedReviewKey } from "../src/gateway/review-key.js";
-import { resolveReviewOutputFromModel } from "../src/llm/review-output.js";
+} from "../src/llm/review-prompt";
+import { hasPostedReviewKey } from "../src/gateway/review-key";
+import { resolveReviewOutputFromModel } from "../src/llm/review-output";
 
 describe("daemon review output resolution", () => {
   it("treats valid empty findings JSON as no findings", () => {

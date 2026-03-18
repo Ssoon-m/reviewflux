@@ -1,6 +1,6 @@
 import { completeSimple, getModel } from "@mariozechner/pi-ai";
 import type { AssistantMessage, Context, Message } from "@mariozechner/pi-ai";
-import type { ChatInput } from "../types.js";
+import type { ChatInput } from "../types";
 
 type GeminiProviderClientOptions = {
   baseUrl: string;

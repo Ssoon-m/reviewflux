@@ -10,12 +10,12 @@ import {
   loadConfig,
   type ReviewFluxConfig,
   saveConfig,
-} from "../src/cli/config.js";
+} from "../src/cli/config";
 import {
   ensureReviewFluxLogsDir,
   getReviewFluxHome,
   getReviewFluxLogsDir,
-} from "../src/config/reviewflux-home.js";
+} from "../src/config/reviewflux-home";
 
 describe("cli-config", () => {
   it("saves and loads config under ~/.reviewflux", () => {

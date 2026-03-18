@@ -1,7 +1,7 @@
 import { setTimeout as wait } from "node:timers/promises";
-import { loadConfig } from "../../cli/config.js";
-import { logging } from "../../infra/logging/index.js";
-import { assertGhReady } from "../../review/github.js";
+import { loadConfig } from "../../cli/config";
+import { logging } from "../../infra/logging/index";
+import { assertGhReady } from "../../review/github";
 import {
   ReviewJobStore,
   ReviewJobWorker,
@@ -9,10 +9,10 @@ import {
   ReviewPollStateStore,
   ReviewQueueDatabase,
   reviewQueuePath,
-} from "../../review/queue/index.js";
-import type { ProjectConfig } from "../../review/types.js";
+} from "../../review/queue/index";
+import type { ProjectConfig } from "../../review/types";
 
-export { resolveReviewOutputFromModel } from "../../llm/review-output.js";
+export { resolveReviewOutputFromModel } from "../../llm/review-output";
 
 function resolvePositiveInt(raw: string | undefined, fallback: number): number {
   const parsed = Number.parseInt(raw ?? "", 10);
@@ -233,7 +233,7 @@ export async function runDaemonStartCommand(
 
   if (projects.length === 0) {
     console.log(
-      "[reviewflux] no repositories configured. run: reviewflux repo add",
+      "[reviewflux] no repositories configured. run: rvw repo add",
     );
     logDaemonEvent({
       event: "daemon_no_projects",

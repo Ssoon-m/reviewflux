@@ -1,11 +1,11 @@
 import { completeSimple, getModel } from "@mariozechner/pi-ai";
 import type { AssistantMessage, Context, Message } from "@mariozechner/pi-ai";
-import { OAuthTokenProvider } from "../auth/oauth-token-provider.js";
-import { CUSTOM_PROVIDER_ID_ANTHROPIC, CUSTOM_PROVIDER_ID_OPENAI } from "./custom-provider.js";
-import { GeminiProviderClient } from "./providers/gemini-provider.js";
-import { OpenAIProviderClient } from "./providers/openai-provider.js";
-import { AnthropicProviderClient } from "./providers/anthropic-provider.js";
-import type { ChatInput, LlmProvider, LlmProviderName } from "./types.js";
+import type { OAuthTokenProvider } from "../auth/oauth-token-provider";
+import { CUSTOM_PROVIDER_ID_ANTHROPIC, CUSTOM_PROVIDER_ID_OPENAI } from "./custom-provider";
+import { GeminiProviderClient } from "./providers/gemini-provider";
+import { OpenAIProviderClient } from "./providers/openai-provider";
+import { AnthropicProviderClient } from "./providers/anthropic-provider";
+import type { ChatInput, LlmProvider, LlmProviderName } from "./types";
 
 function toPiContext(messages: ChatInput[], provider: string, model: string): Context {
   const now = Date.now();
