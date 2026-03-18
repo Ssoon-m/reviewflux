@@ -13,7 +13,7 @@ After this change, ReviewFlux should have a concrete, repeatable release path fo
 - [x] (2026-03-18 07:00Z) Installed `@changesets/cli` and initialized `.changeset/`.
 - [x] (2026-03-18 07:03Z) Confirmed there are no existing local workflow files under `.github/workflows/`.
 - [x] (2026-03-18 07:08Z) Added Changesets scripts to `package.json`, set `.changeset/config.json` access to `public`, and restored `src/commands/setup/REVIEWFLUX-AGENTS.md` to the publish allowlist.
-- [x] (2026-03-18 07:11Z) Added `.github/workflows/release.yml` for release PR creation and npm publish on `main` using Changesets.
+- [x] (2026-03-18 07:11Z) Added `.github/workflows/release.yml` for tag-driven npm publish automation.
 - [x] (2026-03-18 07:15Z) Added `.changeset/few-hounds-relax.md` so the new release flow has a concrete release plan to process.
 - [x] (2026-03-18 07:18Z) Verified package contents, release commands, and workflow syntax/behavior proxies locally.
 
@@ -26,8 +26,8 @@ After this change, ReviewFlux should have a concrete, repeatable release path fo
 
 ## Decision Log
 
-- Decision: Use Changesets as the version source of truth for this single-package repo.
-  Rationale: It fits the existing pnpm-based CLI package, removes manual version editing, and can drive a release PR plus publish flow through GitHub Actions without inventing custom scripts.
+- Decision: Use Changesets as the version source of truth for this single-package repo, but trigger publishing from git tags rather than a release PR workflow.
+  Rationale: It fits the existing pnpm-based CLI package, removes manual version editing, and matches the requested tag-based release model while keeping version/changelog generation explicit.
   Date/Author: 2026-03-18 / OpenCode
 - Decision: Keep the release automation CLI-only and avoid reviving the old `gateway/http-server` publish surface.
   Rationale: The documented product surface is the `rvw` / `reviewflux` CLI, and prior inspection showed `http-server` was not part of the documented npm contract.
@@ -35,7 +35,7 @@ After this change, ReviewFlux should have a concrete, repeatable release path fo
 
 ## Outcomes & Retrospective
 
-Changesets is now installed and wired into the repo's release surface. The package scripts expose `pnpm changeset`, `pnpm version-packages`, and `pnpm release`; the publish allowlist again includes `src/commands/setup/REVIEWFLUX-AGENTS.md`; a release workflow now creates or updates release PRs and publishes from `main`; and the repo now has an initial changeset so `pnpm changeset status --verbose` resolves to a concrete patch release plan instead of a configuration error.
+Changesets is now installed and wired into the repo's release surface. The package scripts expose `pnpm changeset`, `pnpm version-packages`, and `pnpm release`; the publish allowlist again includes `src/commands/setup/REVIEWFLUX-AGENTS.md`; a release workflow now publishes from matching `v*` tags that point to `main`; and the repo now has an initial changeset so `pnpm changeset status --verbose` resolves to a concrete patch release plan instead of a configuration error.
 
 ## Context and Orientation
 
