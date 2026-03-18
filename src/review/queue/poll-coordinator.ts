@@ -4,11 +4,14 @@ import {
   fetchIssueInfo,
   ghApiPaginatedJson,
   listOpenPullRequests,
+  listPullRequestIssueComments,
+  listPullRequestReviewComments,
   parseOwnerRepo,
 } from "../github";
 import type {
   IssueComment,
   ProjectConfig,
+  PullRequestSummary,
   PullReviewComment,
   ReviewTriggerReason,
 } from "../types";
@@ -18,11 +21,55 @@ import {
 } from "./event-key";
 import type { ReviewJobStore } from "./job-store";
 import type { ReviewPollStateStore } from "./poll-state-store";
-import type { EnqueueReviewJobInput, ProjectPollSnapshot } from "./types";
+import type {
+  EnqueueReviewJobInput,
+  ProjectPollSnapshot,
+  ProjectPullRequestPollState,
+} from "./types";
 
 type AutomaticReviewReason = Exclude<ReviewTriggerReason, "manual_force">;
 
 const FORCE_COMMAND = "@reviewflux";
+const DEFAULT_POLL_INTERVAL_MS = Math.max(
+  resolvePositiveInt(process.env.REVIEWFLUX_POLL_INTERVAL_MS, 30_000),
+  5_000,
+);
+const TARGETED_REFRESH_INTERVAL_MS = Math.max(
+  resolvePositiveInt(
+    process.env.REVIEWFLUX_POLL_TARGETED_REFRESH_INTERVAL_MS,
+    DEFAULT_POLL_INTERVAL_MS,
+  ),
+  5_000,
+);
+const MANUAL_BACKSTOP_INTERVAL_MS = Math.max(
+  resolvePositiveInt(
+    process.env.REVIEWFLUX_POLL_MANUAL_SWEEP_INTERVAL_MS,
+    10 * 60_000,
+  ),
+  DEFAULT_POLL_INTERVAL_MS,
+);
+
+function resolvePositiveInt(raw: string | undefined, fallback: number): number {
+  const parsed = Number.parseInt(raw ?? "", 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+  return parsed;
+}
+
+function nowIso(): string {
+  return new Date().toISOString();
+}
+
+function addMilliseconds(iso: string, milliseconds: number): string {
+  return new Date(Date.parse(iso) + milliseconds).toISOString();
+}
+
+function isDeadlineDue(deadline: string | null, now: string): boolean {
+  return deadline !== null && deadline <= now;
+}
+
+function isManualBackstopDue(deadline: string | null, now: string): boolean {
+  return deadline === null || deadline <= now;
+}
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -78,6 +125,104 @@ function maxCommentId<T extends { id: number }>(comments: T[]): number | null {
   );
 }
 
+function sortByCommentId<T extends { id: number }>(comments: T[]): T[] {
+  return [...comments].sort((left, right) => left.id - right.id);
+}
+
+function buildInitialPrPollState(
+  pullRequest: PullRequestSummary,
+): ProjectPullRequestPollState {
+  return {
+    headSha: pullRequest.head.sha,
+    lastSeenUpdatedAt: pullRequest.updated_at ?? null,
+    lastSeenIssueCommentId: null,
+    lastSeenReviewCommentId: null,
+    lastTargetedRefreshAt: null,
+    nextTargetedRefreshAt: null,
+  };
+}
+
+function buildAutomaticReviewJob(params: {
+  repo: string;
+  repoKey: string;
+  prNumber: number;
+  reason: AutomaticReviewReason;
+  prHeadSha: string;
+}): EnqueueReviewJobInput {
+  return {
+    repoKey: params.repoKey,
+    prNumber: params.prNumber,
+    reason: params.reason,
+    eventName: "pull_request",
+    eventKey: buildAutomaticReviewEventKey({
+      repo: params.repo,
+      prNumber: params.prNumber,
+      reason: params.reason,
+      prHeadSha: params.prHeadSha,
+    }),
+    payload: {
+      repo: params.repoKey,
+      prNumber: params.prNumber,
+      reason: params.reason,
+    },
+  };
+}
+
+function buildIssueCommentManualJob(params: {
+  repoKey: string;
+  prNumber: number;
+  comment: IssueComment;
+}): EnqueueReviewJobInput {
+  const manualTrigger = {
+    eventName: "issue_comment" as const,
+    commentId: String(params.comment.id),
+    commentUrl: params.comment.html_url,
+    senderLogin: params.comment.user?.login,
+  };
+  return {
+    repoKey: params.repoKey,
+    prNumber: params.prNumber,
+    reason: "manual_force",
+    eventName: manualTrigger.eventName,
+    eventKey: buildManualReviewEventKey(manualTrigger),
+    payload: {
+      repo: params.repoKey,
+      prNumber: params.prNumber,
+      reason: "manual_force",
+      manualTrigger,
+    },
+  };
+}
+
+function buildReviewCommentManualJob(params: {
+  repoKey: string;
+  prNumber: number;
+  comment: PullReviewComment;
+}): EnqueueReviewJobInput {
+  const manualTrigger = {
+    eventName: "pull_request_review_comment" as const,
+    commentId: String(params.comment.id),
+    commentUrl: params.comment.html_url,
+    senderLogin: params.comment.user?.login,
+    reviewReplyToCommentId: String(
+      params.comment.in_reply_to_id ?? params.comment.id,
+    ),
+  };
+  return {
+    repoKey: params.repoKey,
+    prNumber: params.prNumber,
+    reason: "manual_force",
+    eventName: manualTrigger.eventName,
+    eventKey: buildManualReviewEventKey(manualTrigger),
+    payload: {
+      repo: params.repoKey,
+      prNumber: params.prNumber,
+      reason: "manual_force",
+      manualTrigger,
+    },
+  };
+}
+
 function logPollBaselinePrimed(repoKey: string): void {
   logging({
     surface: "queue-poller",
@@ -131,9 +276,10 @@ export class ReviewPollCoordinator {
     const repoKey = normalizeRepoKey(project.repo);
     const forceCommand = project.pr.forceCommand?.trim() || FORCE_COMMAND;
     const snapshot = this.pollStateStore.loadProject(repoKey);
+    const now = nowIso();
 
     if (!snapshot.initialized) {
-      await this.primeProject(project, snapshot);
+      await this.primeProject(project, snapshot, now);
       logPollBaselinePrimed(repoKey);
       return;
     }
@@ -142,6 +288,7 @@ export class ReviewPollCoordinator {
       project,
       snapshot,
       forceCommand,
+      now,
     );
     this.persistSnapshot(nextSnapshot);
     if (nextSnapshot.jobs.length > 0) {
@@ -152,23 +299,29 @@ export class ReviewPollCoordinator {
   private async primeProject(
     project: ProjectConfig,
     snapshot: ProjectPollSnapshot,
+    now: string,
   ): Promise<void> {
     const { owner, name } = parseOwnerRepo(project.repo);
-    const pulls = await listOpenPullRequests(project.repo);
-    const issueComments = await ghApiPaginatedJson<IssueComment>(
-      `repos/${owner}/${name}/issues/comments`,
-    );
-    const reviewComments = await ghApiPaginatedJson<PullReviewComment>(
-      `repos/${owner}/${name}/pulls/comments`,
-    );
+    const [pulls, issueComments, reviewComments] = await Promise.all([
+      listOpenPullRequests(project.repo),
+      ghApiPaginatedJson<IssueComment>(`repos/${owner}/${name}/issues/comments`),
+      ghApiPaginatedJson<PullReviewComment>(
+        `repos/${owner}/${name}/pulls/comments`,
+      ),
+    ]);
 
     const nextSnapshot: ProjectPollSnapshot = {
       repoKey: snapshot.repoKey,
       initialized: true,
       lastSeenIssueCommentId: maxCommentId(issueComments),
       lastSeenReviewCommentId: maxCommentId(reviewComments),
-      prHeads: Object.fromEntries(
-        pulls.map((pr) => [String(pr.number), pr.head.sha]),
+      lastManualBackstopAt: now,
+      nextManualBackstopAt: addMilliseconds(now, MANUAL_BACKSTOP_INTERVAL_MS),
+      prStates: Object.fromEntries(
+        pulls.map((pullRequest) => [
+          String(pullRequest.number),
+          buildInitialPrPollState(pullRequest),
+        ]),
       ),
     };
     this.persistSnapshot(nextSnapshot);
@@ -178,156 +331,266 @@ export class ReviewPollCoordinator {
     project: ProjectConfig,
     snapshot: ProjectPollSnapshot,
     forceCommand: string,
+    now: string,
   ): Promise<{ snapshot: ProjectPollSnapshot; jobs: EnqueueReviewJobInput[] }> {
     const jobs: EnqueueReviewJobInput[] = [];
     const pulls = await listOpenPullRequests(project.repo);
-    const nextPrHeads: Record<string, string> = {};
+    const nextPrStates: Record<string, ProjectPullRequestPollState> = {};
+    const targetedRefreshes: Array<{
+      pullRequest: PullRequestSummary;
+      scheduleFollowUp: boolean;
+    }> = [];
 
-    for (const pr of pulls) {
-      const prKey = String(pr.number);
-      const prevSha = snapshot.prHeads[prKey];
-      nextPrHeads[prKey] = pr.head.sha;
+    for (const pullRequest of pulls) {
+      const prKey = String(pullRequest.number);
+      const previousState = snapshot.prStates[prKey] ?? null;
+      const remoteUpdatedAt = pullRequest.updated_at ?? null;
 
-      if (!prevSha) {
+      if (!previousState) {
+        nextPrStates[prKey] = buildInitialPrPollState(pullRequest);
         if (shouldReviewOnPrAction(project, "opened")) {
           const reason = resolveReasonForPrAction(project, "opened");
-          jobs.push({
-            repoKey: snapshot.repoKey,
-            prNumber: pr.number,
-            reason,
-            eventName: "pull_request",
-            eventKey: buildAutomaticReviewEventKey({
+          jobs.push(
+            buildAutomaticReviewJob({
               repo: project.repo,
-              prNumber: pr.number,
+              repoKey: snapshot.repoKey,
+              prNumber: pullRequest.number,
               reason,
-              prHeadSha: pr.head.sha,
+              prHeadSha: pullRequest.head.sha,
             }),
-            payload: {
-              repo: snapshot.repoKey,
-              prNumber: pr.number,
-              reason,
-            },
-          });
+          );
         }
+        targetedRefreshes.push({ pullRequest, scheduleFollowUp: true });
         continue;
       }
 
-      if (
-        prevSha !== pr.head.sha &&
-        shouldReviewOnPrAction(project, "synchronize")
-      ) {
+      const headChanged = previousState.headSha !== pullRequest.head.sha;
+      const updatedAtChanged = previousState.lastSeenUpdatedAt !== remoteUpdatedAt;
+      const targetedRefreshDue = isDeadlineDue(
+        previousState.nextTargetedRefreshAt,
+        now,
+      );
+
+      nextPrStates[prKey] = {
+        ...previousState,
+        headSha: pullRequest.head.sha,
+        lastSeenUpdatedAt: remoteUpdatedAt,
+      };
+
+      if (headChanged && shouldReviewOnPrAction(project, "synchronize")) {
         const reason = resolveReasonForPrAction(project, "synchronize");
-        jobs.push({
-          repoKey: snapshot.repoKey,
-          prNumber: pr.number,
-          reason,
-          eventName: "pull_request",
-          eventKey: buildAutomaticReviewEventKey({
+        jobs.push(
+          buildAutomaticReviewJob({
             repo: project.repo,
-            prNumber: pr.number,
+            repoKey: snapshot.repoKey,
+            prNumber: pullRequest.number,
             reason,
-            prHeadSha: pr.head.sha,
+            prHeadSha: pullRequest.head.sha,
           }),
-          payload: {
-            repo: snapshot.repoKey,
-            prNumber: pr.number,
-            reason,
-          },
+        );
+      }
+
+      if (headChanged || updatedAtChanged || targetedRefreshDue) {
+        targetedRefreshes.push({
+          pullRequest,
+          scheduleFollowUp: headChanged || updatedAtChanged,
         });
       }
     }
 
-    const { owner, name } = parseOwnerRepo(project.repo);
-    const issueComments = await ghApiPaginatedJson<IssueComment>(
-      `repos/${owner}/${name}/issues/comments`,
-    );
-    const reviewComments = await ghApiPaginatedJson<PullReviewComment>(
-      `repos/${owner}/${name}/pulls/comments`,
-    );
-
-    const sortedIssueComments = [...issueComments].sort((a, b) => a.id - b.id);
-    for (const comment of sortedIssueComments) {
-      if (
-        snapshot.lastSeenIssueCommentId !== null &&
-        comment.id <= snapshot.lastSeenIssueCommentId
-      ) {
-        continue;
-      }
-      if (!containsForceCommand(comment.body, forceCommand)) continue;
-
-      const issueNumber = parseIssueNumberFromIssueUrl(comment.issue_url);
-      if (!issueNumber) continue;
-      const issue = await fetchIssueInfo(project.repo, issueNumber);
-      if (!issue.pull_request) continue;
-
-      const manualTrigger = {
-        eventName: "issue_comment" as const,
-        commentId: String(comment.id),
-        commentUrl: comment.html_url,
-        senderLogin: comment.user?.login,
-      };
-      jobs.push({
-        repoKey: snapshot.repoKey,
-        prNumber: issue.number,
-        reason: "manual_force",
-        eventName: manualTrigger.eventName,
-        eventKey: buildManualReviewEventKey(manualTrigger),
-        payload: {
-          repo: snapshot.repoKey,
-          prNumber: issue.number,
-          reason: "manual_force",
-          manualTrigger,
-        },
+    for (const targetedRefresh of targetedRefreshes) {
+      const prKey = String(targetedRefresh.pullRequest.number);
+      const currentState = nextPrStates[prKey];
+      const refreshed = await this.refreshPullRequest({
+        project,
+        repoSnapshot: snapshot,
+        prNumber: targetedRefresh.pullRequest.number,
+        prState: currentState,
+        forceCommand,
+        now,
+        scheduleFollowUp: targetedRefresh.scheduleFollowUp,
       });
+      nextPrStates[prKey] = refreshed.prState;
+      jobs.push(...refreshed.jobs);
     }
 
-    const sortedReviewComments = [...reviewComments].sort(
-      (a, b) => a.id - b.id,
-    );
-    for (const comment of sortedReviewComments) {
-      if (
-        snapshot.lastSeenReviewCommentId !== null &&
-        comment.id <= snapshot.lastSeenReviewCommentId
-      ) {
-        continue;
-      }
-      if (!containsForceCommand(comment.body, forceCommand)) continue;
+    let lastSeenIssueCommentId = snapshot.lastSeenIssueCommentId;
+    let lastSeenReviewCommentId = snapshot.lastSeenReviewCommentId;
+    let lastManualBackstopAt = snapshot.lastManualBackstopAt;
+    let nextManualBackstopAt = snapshot.nextManualBackstopAt;
 
-      const prNumber = parsePrNumberFromPullUrl(comment.pull_request_url);
-      if (!prNumber) continue;
-
-      const manualTrigger = {
-        eventName: "pull_request_review_comment" as const,
-        commentId: String(comment.id),
-        commentUrl: comment.html_url,
-        senderLogin: comment.user?.login,
-        reviewReplyToCommentId: String(comment.in_reply_to_id ?? comment.id),
-      };
-      jobs.push({
-        repoKey: snapshot.repoKey,
-        prNumber,
-        reason: "manual_force",
-        eventName: manualTrigger.eventName,
-        eventKey: buildManualReviewEventKey(manualTrigger),
-        payload: {
-          repo: snapshot.repoKey,
-          prNumber,
-          reason: "manual_force",
-          manualTrigger,
-        },
+    if (isManualBackstopDue(snapshot.nextManualBackstopAt, now)) {
+      const manualBackstop = await this.runManualBackstop({
+        project,
+        repoSnapshot: snapshot,
+        forceCommand,
+        now,
       });
+      lastSeenIssueCommentId = manualBackstop.lastSeenIssueCommentId;
+      lastSeenReviewCommentId = manualBackstop.lastSeenReviewCommentId;
+      lastManualBackstopAt = manualBackstop.lastManualBackstopAt;
+      nextManualBackstopAt = manualBackstop.nextManualBackstopAt;
+      jobs.push(...manualBackstop.jobs);
     }
 
     return {
       snapshot: {
         repoKey: snapshot.repoKey,
         initialized: true,
-        lastSeenIssueCommentId:
-          maxCommentId(issueComments) ?? snapshot.lastSeenIssueCommentId,
-        lastSeenReviewCommentId:
-          maxCommentId(reviewComments) ?? snapshot.lastSeenReviewCommentId,
-        prHeads: nextPrHeads,
+        lastSeenIssueCommentId,
+        lastSeenReviewCommentId,
+        lastManualBackstopAt,
+        nextManualBackstopAt,
+        prStates: nextPrStates,
       },
+      jobs,
+    };
+  }
+
+  private async refreshPullRequest(params: {
+    project: ProjectConfig;
+    repoSnapshot: ProjectPollSnapshot;
+    prNumber: number;
+    prState: ProjectPullRequestPollState;
+    forceCommand: string;
+    now: string;
+    scheduleFollowUp: boolean;
+  }): Promise<{
+    prState: ProjectPullRequestPollState;
+    jobs: EnqueueReviewJobInput[];
+  }> {
+    const [issueComments, reviewComments] = await Promise.all([
+      listPullRequestIssueComments(params.project.repo, params.prNumber),
+      listPullRequestReviewComments(params.project.repo, params.prNumber),
+    ]);
+    const jobs: EnqueueReviewJobInput[] = [];
+    const issueCursor =
+      params.prState.lastSeenIssueCommentId ??
+      params.repoSnapshot.lastSeenIssueCommentId;
+    const reviewCursor =
+      params.prState.lastSeenReviewCommentId ??
+      params.repoSnapshot.lastSeenReviewCommentId;
+
+    for (const comment of sortByCommentId(issueComments)) {
+      if (issueCursor !== null && comment.id <= issueCursor) {
+        continue;
+      }
+      if (!containsForceCommand(comment.body, params.forceCommand)) continue;
+      jobs.push(
+        buildIssueCommentManualJob({
+          repoKey: params.repoSnapshot.repoKey,
+          prNumber: params.prNumber,
+          comment,
+        }),
+      );
+    }
+
+    for (const comment of sortByCommentId(reviewComments)) {
+      if (reviewCursor !== null && comment.id <= reviewCursor) {
+        continue;
+      }
+      if (!containsForceCommand(comment.body, params.forceCommand)) continue;
+      jobs.push(
+        buildReviewCommentManualJob({
+          repoKey: params.repoSnapshot.repoKey,
+          prNumber: params.prNumber,
+          comment,
+        }),
+      );
+    }
+
+    const shouldFollowUp = params.scheduleFollowUp || jobs.length > 0;
+
+    return {
+      prState: {
+        ...params.prState,
+        lastSeenIssueCommentId: maxCommentId(issueComments) ?? issueCursor,
+        lastSeenReviewCommentId: maxCommentId(reviewComments) ?? reviewCursor,
+        lastTargetedRefreshAt: params.now,
+        nextTargetedRefreshAt: shouldFollowUp
+          ? addMilliseconds(params.now, TARGETED_REFRESH_INTERVAL_MS)
+          : null,
+      },
+      jobs,
+    };
+  }
+
+  private async runManualBackstop(params: {
+    project: ProjectConfig;
+    repoSnapshot: ProjectPollSnapshot;
+    forceCommand: string;
+    now: string;
+  }): Promise<{
+    lastSeenIssueCommentId: number | null;
+    lastSeenReviewCommentId: number | null;
+    lastManualBackstopAt: string;
+    nextManualBackstopAt: string;
+    jobs: EnqueueReviewJobInput[];
+  }> {
+    const { owner, name } = parseOwnerRepo(params.project.repo);
+    const [issueComments, reviewComments] = await Promise.all([
+      ghApiPaginatedJson<IssueComment>(`repos/${owner}/${name}/issues/comments`),
+      ghApiPaginatedJson<PullReviewComment>(
+        `repos/${owner}/${name}/pulls/comments`,
+      ),
+    ]);
+    const jobs: EnqueueReviewJobInput[] = [];
+
+    for (const comment of sortByCommentId(issueComments)) {
+      if (
+        params.repoSnapshot.lastSeenIssueCommentId !== null &&
+        comment.id <= params.repoSnapshot.lastSeenIssueCommentId
+      ) {
+        continue;
+      }
+      if (!containsForceCommand(comment.body, params.forceCommand)) continue;
+
+      const issueNumber = parseIssueNumberFromIssueUrl(comment.issue_url);
+      if (!issueNumber) continue;
+      const issue = await fetchIssueInfo(params.project.repo, issueNumber);
+      if (!issue.pull_request) continue;
+
+      jobs.push(
+        buildIssueCommentManualJob({
+          repoKey: params.repoSnapshot.repoKey,
+          prNumber: issue.number,
+          comment,
+        }),
+      );
+    }
+
+    for (const comment of sortByCommentId(reviewComments)) {
+      if (
+        params.repoSnapshot.lastSeenReviewCommentId !== null &&
+        comment.id <= params.repoSnapshot.lastSeenReviewCommentId
+      ) {
+        continue;
+      }
+      if (!containsForceCommand(comment.body, params.forceCommand)) continue;
+
+      const prNumber = parsePrNumberFromPullUrl(comment.pull_request_url);
+      if (!prNumber) continue;
+
+      jobs.push(
+        buildReviewCommentManualJob({
+          repoKey: params.repoSnapshot.repoKey,
+          prNumber,
+          comment,
+        }),
+      );
+    }
+
+    return {
+      lastSeenIssueCommentId:
+        maxCommentId(issueComments) ?? params.repoSnapshot.lastSeenIssueCommentId,
+      lastSeenReviewCommentId:
+        maxCommentId(reviewComments) ??
+        params.repoSnapshot.lastSeenReviewCommentId,
+      lastManualBackstopAt: params.now,
+      nextManualBackstopAt: addMilliseconds(
+        params.now,
+        MANUAL_BACKSTOP_INTERVAL_MS,
+      ),
       jobs,
     };
   }

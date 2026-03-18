@@ -5,7 +5,7 @@ Source of truth: `src/review/queue/schema.ts`
 Maintenance rule: this file is a checked-in snapshot. Update it by hand in the same change whenever `src/review/queue/schema.ts` changes. Do not treat this file as an independent source of truth.
 
 ## Schema Version
-- `REVIEW_QUEUE_SCHEMA_VERSION = 2`
+- `REVIEW_QUEUE_SCHEMA_VERSION = 3`
 
 ## Tables
 
@@ -27,12 +27,19 @@ Maintenance rule: this file is a checked-in snapshot. Update it by hand in the s
 - `initialized INTEGER NOT NULL DEFAULT 0`
 - `last_seen_issue_comment_id INTEGER`
 - `last_seen_review_comment_id INTEGER`
+- `last_manual_backstop_at TEXT`
+- `next_manual_backstop_at TEXT`
 - `updated_at TEXT NOT NULL`
 
 ### `project_pr_heads`
 - `repo_key TEXT NOT NULL`
 - `pr_number INTEGER NOT NULL`
 - `head_sha TEXT NOT NULL`
+- `last_seen_updated_at TEXT`
+- `last_seen_issue_comment_id INTEGER`
+- `last_seen_review_comment_id INTEGER`
+- `last_targeted_refresh_at TEXT`
+- `next_targeted_refresh_at TEXT`
 - `updated_at TEXT NOT NULL`
 - Primary key: `(repo_key, pr_number)`
 
