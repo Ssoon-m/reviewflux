@@ -221,7 +221,7 @@ describe("setup logging", () => {
         "[reviewflux] setup started",
         `[reviewflux] config directory: ${reviewFluxHome(home)}`,
         `[reviewflux] created global review guidance: ${join(reviewFluxHome(home), "AGENTS.md")}`,
-        "[reviewflux] setup skipped. Run reviewflux setup again when ready.",
+        "[reviewflux] setup skipped. Run rvw setup again when ready.",
       ]),
     );
   });

@@ -68,7 +68,7 @@ describe("daemon-command", () => {
 
     expect(error).toBeInstanceOf(CommanderError);
     expect((error as CommanderError).code).toBe("commander.help");
-    expect(stdout).toContain("Usage: reviewflux daemon");
+    expect(stdout).toContain("Usage: rvw daemon");
     expect(stdout).toContain("install");
     expectNoDaemonHandlersCalled(handlers);
   });
@@ -79,7 +79,7 @@ describe("daemon-command", () => {
 
     expect(error).toBeInstanceOf(CommanderError);
     expect((error as CommanderError).code).toBe("commander.helpDisplayed");
-    expect(stdout).toContain("Usage: reviewflux daemon start");
+    expect(stdout).toContain("Usage: rvw daemon start");
     expect(stdout).toContain("start the background daemon");
     expectNoDaemonHandlersCalled(handlers);
   });
@@ -91,7 +91,7 @@ describe("daemon-command", () => {
     expect(error).toBeInstanceOf(CommanderError);
     expect((error as CommanderError).code).toBe("commander.unknownCommand");
     expect(stderr).toContain("error: unknown command 'nope'");
-    expect(stderr).toContain("Usage: reviewflux daemon");
+    expect(stderr).toContain("Usage: rvw daemon");
     expectNoDaemonHandlersCalled(handlers);
   });
 });

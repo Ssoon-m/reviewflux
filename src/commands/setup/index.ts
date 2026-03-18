@@ -230,7 +230,7 @@ function logSetupCompletion(
 ): void {
   console.log(`\n[reviewflux] setup complete: ${path}`);
   console.log(`[reviewflux] queue database: ${reviewQueuePath(home)}`);
-  console.log("Next: reviewflux daemon start");
+  console.log("Next: rvw daemon start");
   logSetupEvent?.({
     event: "setup_completed",
     type: "lifecycle",
@@ -780,7 +780,7 @@ export async function runSetupFlow(
 
     if (selectedGroupKey === SKIP_VALUE) {
       console.log(
-        "[reviewflux] setup skipped. Run reviewflux setup again when ready.",
+        "[reviewflux] setup skipped. Run rvw setup again when ready.",
       );
       runtime.logSetupEvent({
         event: "setup_skipped",

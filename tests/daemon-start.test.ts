@@ -390,7 +390,7 @@ describe("daemon start cycle", () => {
       expect(runCycle).not.toHaveBeenCalled();
       expect(logSpy.mock.calls.map(([message]) => message)).toEqual([
         "[reviewflux] daemon start",
-        "[reviewflux] no repositories configured. run: reviewflux repo add",
+        "[reviewflux] no repositories configured. run: rvw repo add",
       ]);
 
       expect(readDaemonLog(home, "2026-03-14")).toEqual([

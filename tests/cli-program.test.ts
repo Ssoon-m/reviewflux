@@ -8,7 +8,7 @@ describe("cli-program", () => {
   it("builds the Commander root program", () => {
     const harness = createCommanderTestHarness(buildProgram);
 
-    expect(harness.program.name()).toBe("reviewflux");
+    expect(harness.program.name()).toBe("rvw");
     expect(harness.program.commands.map((command) => command.name())).toEqual(
       expect.arrayContaining(["setup", "repo", "daemon"]),
     );
@@ -20,7 +20,7 @@ describe("cli-program", () => {
 
     expect(error).toBeInstanceOf(CommanderError);
     expect((error as CommanderError).code).toBe("commander.helpDisplayed");
-    expect(stdout).toContain("Usage: reviewflux");
+    expect(stdout).toContain("Usage: rvw");
     expect(stdout).toContain("help [command]");
     expect(stdout).toContain("repo");
   });
@@ -31,7 +31,7 @@ describe("cli-program", () => {
 
     expect(error).toBeInstanceOf(CommanderError);
     expect((error as CommanderError).code).toBe("commander.help");
-    expect(stdout).toContain("Usage: reviewflux");
+    expect(stdout).toContain("Usage: rvw");
     expect(stdout).toContain("help [command]");
     expect(stdout).toContain("daemon");
   });
@@ -42,7 +42,7 @@ describe("cli-program", () => {
 
     expect(error).toBeInstanceOf(CommanderError);
     expect((error as CommanderError).code).toBe("commander.help");
-    expect(stdout).toContain("Usage: reviewflux repo");
+    expect(stdout).toContain("Usage: rvw repo");
     expect(stdout).toContain("set-model");
   });
 
@@ -53,7 +53,7 @@ describe("cli-program", () => {
 
     expect(error).toBeInstanceOf(CommanderError);
     expect((error as CommanderError).code).toBe("commander.help");
-    expect(output).toContain("Usage: reviewflux repo");
+    expect(output).toContain("Usage: rvw repo");
     expect(output).toContain("remove");
   });
 
@@ -64,7 +64,7 @@ describe("cli-program", () => {
 
     expect(error).toBeInstanceOf(CommanderError);
     expect((error as CommanderError).code).toBe("commander.help");
-    expect(output).toContain("Usage: reviewflux daemon");
+    expect(output).toContain("Usage: rvw daemon");
     expect(output).toContain("install");
   });
 
@@ -83,7 +83,7 @@ describe("cli-program", () => {
 
     expect(error).toBeInstanceOf(CommanderError);
     expect((error as CommanderError).code).toBe("commander.helpDisplayed");
-    expect(stdout).toContain("Usage: reviewflux setup");
+    expect(stdout).toContain("Usage: rvw setup");
     expect(stdout).toContain("--advanced");
   });
 
@@ -94,7 +94,7 @@ describe("cli-program", () => {
     expect(error).toBeInstanceOf(CommanderError);
     expect((error as CommanderError).code).toBe("commander.unknownOption");
     expect(stderr).toContain("error: unknown option '--bogus'");
-    expect(stderr).toContain("Usage: reviewflux setup");
+    expect(stderr).toContain("Usage: rvw setup");
   });
 
   it("routes daemon start through the registered daemon builder", async () => {

@@ -4,6 +4,7 @@
   "description": "CLI-first event-driven review runtime",
   "main": "dist/gateway/http-server.mjs",
   "bin": {
+    "rvw": "dist/cli/index.mjs",
     "reviewflux": "dist/cli/index.mjs"
   },
   "scripts": {
@@ -14,6 +15,7 @@
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "prepare": "husky",
+    "rvw": "node scripts/run-node.mjs",
     "reviewflux": "node scripts/run-node.mjs",
     "test": "vitest run",
     "test:all": "pnpm build && pnpm check && pnpm lint && pnpm depcruise && pnpm test",

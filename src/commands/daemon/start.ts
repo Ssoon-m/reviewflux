@@ -233,7 +233,7 @@ export async function runDaemonStartCommand(
 
   if (projects.length === 0) {
     console.log(
-      "[reviewflux] no repositories configured. run: reviewflux repo add",
+      "[reviewflux] no repositories configured. run: rvw repo add",
     );
     logDaemonEvent({
       event: "daemon_no_projects",

@@ -10,5 +10,6 @@
 - `docs/exec-plans/completed/eslint-dependency-cruiser-editor-integration.md` - surface `.dependency-cruiser.cjs` boundary violations through ESLint so editors show the same architectural errors as `pnpm depcruise`.
 - `docs/exec-plans/completed/extensionless-local-imports-adoption.md` - switch the repo to extensionless local imports while keeping build, lint, boundary validation, and tests green.
 - `docs/exec-plans/completed/commit-and-push-validation-hooks.md` - install Husky so local commits run type-checking, lint, and dependency-cruiser validation, and local pushes rerun type-checking before leaving the machine.
+- `docs/exec-plans/completed/rvw-command-alias-rollout.md` - make `rvw` the preferred CLI invocation across the shipped binary, help output, docs, and command hints while keeping `reviewflux` as a compatibility alias.
 
 Use this directory to index plans that are no longer in flight but still explain why the current implementation looks the way it does.

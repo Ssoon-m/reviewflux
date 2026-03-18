@@ -68,7 +68,7 @@ describe("repo-command", () => {
 
     expect(error).toBeInstanceOf(CommanderError);
     expect((error as CommanderError).code).toBe("commander.help");
-    expect(stdout).toContain("Usage: reviewflux repo");
+    expect(stdout).toContain("Usage: rvw repo");
     expect(stdout).toContain("remove");
     expectNoRepoHandlersCalled(handlers);
   });
@@ -79,7 +79,7 @@ describe("repo-command", () => {
 
     expect(error).toBeInstanceOf(CommanderError);
     expect((error as CommanderError).code).toBe("commander.helpDisplayed");
-    expect(stdout).toContain("Usage: reviewflux repo add");
+    expect(stdout).toContain("Usage: rvw repo add");
     expect(stdout).toContain("add a repository to track");
     expectNoRepoHandlersCalled(handlers);
   });
@@ -91,7 +91,7 @@ describe("repo-command", () => {
     expect(error).toBeInstanceOf(CommanderError);
     expect((error as CommanderError).code).toBe("commander.unknownCommand");
     expect(stderr).toContain("error: unknown command 'nope'");
-    expect(stderr).toContain("Usage: reviewflux repo");
+    expect(stderr).toContain("Usage: rvw repo");
     expectNoRepoHandlersCalled(handlers);
   });
 });
