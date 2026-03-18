@@ -105,8 +105,8 @@ git tag v0.1.1
 git push origin v0.1.1
 ```
 
-GitHub Actions will validate that the tag version matches `package.json`, confirm the tag commit is on `main`, run the release checks, and publish to npm.
+That tag push runs the release preview checks only. After it passes, open the `Release` workflow in GitHub Actions, run it manually, and provide the same tag (for example `v0.1.1`) to publish from that exact release tag.
 
-Configure npm trusted publishing for `.github/workflows/release.yml`, or set the repository `NPM_TOKEN` secret if you want the workflow to publish with a token.
+Configure the `npm-release` environment for `.github/workflows/release.yml`, then either enable npm trusted publishing or set the repository `NPM_TOKEN` secret if you want the workflow to publish with a token.
 
 If you need a local fallback instead of the workflow, run `pnpm release` after `pnpm version-packages`. That local publish path requires npm publish credentials that satisfy your package's 2FA policy.

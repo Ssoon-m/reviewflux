@@ -4,19 +4,27 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to publish (for example v0.1.1 or v0.1.1-beta.1)
+        required: true
+        type: string
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: reviewflux-release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
   cancel-in-progress: false
 
-permissions:
-  contents: read
-  id-token: write
+env:
+  NODE_VERSION: "22.14.0"
+  PNPM_VERSION: "10.30.3"
 
 jobs:
-  release:
-    if: github.repository == 'Ssoon-m/reviewflux'
+  preview_release:
+    if: github.event_name == 'push' && github.repository == 'Ssoon-m/reviewflux'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -26,12 +34,12 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
-          version: 10.30.3
+          version: ${{ env.PNPM_VERSION }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
           registry-url: https://registry.npmjs.org
 
@@ -41,6 +49,91 @@ jobs:
       - name: Validate release tag
         env:
           RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+
+          if [[ ! "${RELEASE_TAG}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "Invalid release tag format: ${RELEASE_TAG}"
+            exit 1
+          fi
+
+          PACKAGE_VERSION=$(node -p "require('./package.json').version")
+          TAG_VERSION="${RELEASE_TAG#v}"
+
+          if [[ "${TAG_VERSION}" != "${PACKAGE_VERSION}" ]]; then
+            echo "Release tag ${RELEASE_TAG} does not match package version ${PACKAGE_VERSION}."
+            exit 1
+          fi
+
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+
+          if ! git merge-base --is-ancestor "${GITHUB_SHA}" origin/main; then
+            echo "Release tag ${RELEASE_TAG} must point to a commit on main."
+            exit 1
+          fi
+
+      - name: Ensure version is not already published
+        run: |
+          set -euo pipefail
+          PACKAGE_VERSION=$(node -p "require('./package.json').version")
+
+          if npm view "reviewflux@${PACKAGE_VERSION}" version >/dev/null 2>&1; then
+            echo "reviewflux@${PACKAGE_VERSION} is already published on npm."
+            exit 1
+          fi
+
+      - name: Validate release
+        run: pnpm test:all
+
+      - name: Verify package contents
+        run: npm pack --dry-run --json
+
+      - name: Preview publish command
+        run: npm publish --dry-run
+
+  publish_release:
+    if: github.event_name == 'workflow_dispatch' && github.repository == 'Ssoon-m/reviewflux'
+    runs-on: ubuntu-latest
+    environment: npm-release
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Validate tag input
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+
+          if [[ ! "${RELEASE_TAG}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "Invalid release tag format: ${RELEASE_TAG}"
+            exit 1
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ inputs.tag }}
+          fetch-depth: 0
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Validate release tag
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
         run: |
           set -euo pipefail
           PACKAGE_VERSION=$(node -p "require('./package.json').version")
@@ -53,7 +146,7 @@ jobs:
 
           git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
 
-          if ! git merge-base --is-ancestor "${GITHUB_SHA}" origin/main; then
+          if ! git merge-base --is-ancestor "$(git rev-parse HEAD)" origin/main; then
             echo "Release tag ${RELEASE_TAG} must point to a commit on main."
             exit 1
           fi
