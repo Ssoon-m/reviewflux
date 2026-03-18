@@ -1,8 +1,8 @@
-import { promptSelect, promptText } from "../../cli/clack-prompter.js";
-import { loadConfig, saveConfig, type ReviewFluxConfig } from "../../cli/config.js";
-import { normalizeRepoInput } from "../../lib/repo/input.js";
-import { getSelectableModelsForProvider } from "../../llm/provider-catalog.js";
-import { ensureProviderCredentials, pickRepoProvider } from "./shared.js";
+import { promptSelect, promptText } from "../../cli/clack-prompter";
+import { loadConfig, saveConfig, type ReviewFluxConfig } from "../../cli/config";
+import { normalizeRepoInput } from "../../lib/repo/input";
+import { getSelectableModelsForProvider } from "../../llm/provider-catalog";
+import { ensureProviderCredentials, pickRepoProvider } from "./shared";
 
 function resolveLegacyRepoModel(params: {
   config: ReviewFluxConfig;

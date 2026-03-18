@@ -3,13 +3,13 @@ import { describe, expect, it, vi } from "vitest";
 import {
   buildDaemonCommand,
   type DaemonCommandHandlers,
-} from "../src/commands/daemon/index.js";
+} from "../src/commands/daemon/index";
 import {
   PROGRAM_DESCRIPTION,
   PROGRAM_NAME,
   configureHelp,
-} from "../src/commands/help/index.js";
-import { createCommanderTestHarness } from "./commander-test-harness.js";
+} from "../src/commands/help/index";
+import { createCommanderTestHarness } from "./commander-test-harness";
 
 function createDaemonHandlers(): DaemonCommandHandlers {
   return {

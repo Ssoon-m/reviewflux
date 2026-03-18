@@ -83,7 +83,7 @@ function readLogFile(path: string): {
 
 async function loadLoggingModule(): Promise<LoggingModule> {
   vi.resetModules();
-  return import("../src/infra/logging/index.js");
+  return import("../src/infra/logging/index");
 }
 
 async function loadLoggingModuleWithFsMock(
@@ -97,7 +97,7 @@ async function loadLoggingModuleWithFsMock(
       ...createOverrides(actual),
     };
   });
-  return import("../src/infra/logging/index.js");
+  return import("../src/infra/logging/index");
 }
 
 const homes: string[] = [];

@@ -1,24 +1,24 @@
-import { logging } from "../../infra/logging/index.js";
-import { normalizeRepoKey } from "../../lib/repo/input.js";
+import { logging } from "../../infra/logging/index";
+import { normalizeRepoKey } from "../../lib/repo/input";
 import {
   fetchIssueInfo,
   ghApiPaginatedJson,
   listOpenPullRequests,
   parseOwnerRepo,
-} from "../github.js";
+} from "../github";
 import type {
   IssueComment,
   ProjectConfig,
   PullReviewComment,
   ReviewTriggerReason,
-} from "../types.js";
+} from "../types";
 import {
   buildAutomaticReviewEventKey,
   buildManualReviewEventKey,
-} from "./event-key.js";
-import type { ReviewJobStore } from "./job-store.js";
-import type { ReviewPollStateStore } from "./poll-state-store.js";
-import type { EnqueueReviewJobInput, ProjectPollSnapshot } from "./types.js";
+} from "./event-key";
+import type { ReviewJobStore } from "./job-store";
+import type { ReviewPollStateStore } from "./poll-state-store";
+import type { EnqueueReviewJobInput, ProjectPollSnapshot } from "./types";
 
 type AutomaticReviewReason = Exclude<ReviewTriggerReason, "manual_force">;
 

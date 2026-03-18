@@ -1,8 +1,8 @@
-import type { AppConfig } from "../config/env.js";
-import { createLlmProvider } from "./factory.js";
-import { resolveRequestedModelRef, parseModelAliasesJson } from "./model-selection.js";
-import type { LlmProvider } from "./types.js";
-import { resolveAuthInput } from "./auth-resolver.js";
+import type { AppConfig } from "../config/env";
+import { createLlmProvider } from "./factory";
+import { resolveRequestedModelRef, parseModelAliasesJson } from "./model-selection";
+import type { LlmProvider } from "./types";
+import { resolveAuthInput } from "./auth-resolver";
 
 export { parseModelAliasesJson };
 

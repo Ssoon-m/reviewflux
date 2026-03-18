@@ -1,4 +1,4 @@
-import type { ReviewFluxConfig } from "../cli/config.js";
+import type { ReviewFluxConfig } from "../cli/config";
 
 export type ProjectConfig = NonNullable<ReviewFluxConfig["projects"]>[string];
 

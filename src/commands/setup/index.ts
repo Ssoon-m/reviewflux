@@ -12,16 +12,16 @@ import type { Command } from "commander";
 import {
   loginWithPiOAuth,
   resolveOAuthProviderId,
-} from "../../auth/pi-oauth.js";
+} from "../../auth/pi-oauth";
 import {
   promptPassword,
   promptSelect,
   promptText,
-} from "../../cli/clack-prompter.js";
+} from "../../cli/clack-prompter";
 import {
   type CommandBuilderDependencies,
   resolveCommandBuilderDependencies,
-} from "../../cli/command-builder.js";
+} from "../../cli/command-builder";
 import {
   type AuthMode,
   ensureReviewFluxHome,
@@ -29,25 +29,25 @@ import {
   type LlmProvider,
   type ReviewFluxConfig,
   saveConfig,
-} from "../../cli/config.js";
+} from "../../cli/config";
 import {
   logging,
   type LoggingLevel,
   type LoggingType,
-} from "../../infra/logging/index.js";
+} from "../../infra/logging/index";
 import {
   type CustomCompatibility,
   getCustomProviderId,
   validateCustomProviderConfig,
-} from "../../llm/custom-provider.js";
+} from "../../llm/custom-provider";
 import {
   getProviderChoiceHint,
   getProviderChoiceLabel,
   getProviderGroupsForSelection,
   getSelectableModelsForProvider,
-} from "../../llm/provider-catalog.js";
-import { getCodexEffortLevels } from "../../llm/reasoning-effort.js";
-import { reviewQueuePath } from "../../review/queue/index.js";
+} from "../../llm/provider-catalog";
+import { getCodexEffortLevels } from "../../llm/reasoning-effort";
+import { reviewQueuePath } from "../../review/queue/index";
 
 type SetupOptions = { advanced: boolean };
 type SetupOAuthMode = "browser" | "paste";

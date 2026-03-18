@@ -14,14 +14,14 @@ vi.mock("@mariozechner/pi-ai", async (importOriginal) => {
   };
 });
 
-import { OAuthTokenProvider } from "../src/auth/oauth-token-provider.js";
+import { OAuthTokenProvider } from "../src/auth/oauth-token-provider";
 import {
   GeminiLlmClient,
   OAuthLlmClient,
   OpenAIApiKeyLlmClient,
   createLlmProvider,
   resolveModelRef,
-} from "../src/llm/client.js";
+} from "../src/llm/client";
 
 beforeEach(() => {
   completeSimpleMock.mockReset();

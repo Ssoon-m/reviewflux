@@ -4,12 +4,12 @@ import {
   PROGRAM_DESCRIPTION,
   PROGRAM_NAME,
   configureHelp,
-} from "../src/commands/help/index.js";
+} from "../src/commands/help/index";
 import {
   buildRepoCommand,
   type RepoCommandHandlers,
-} from "../src/commands/repo/index.js";
-import { createCommanderTestHarness } from "./commander-test-harness.js";
+} from "../src/commands/repo/index";
+import { createCommanderTestHarness } from "./commander-test-harness";
 
 function createRepoHandlers(): RepoCommandHandlers {
   return {

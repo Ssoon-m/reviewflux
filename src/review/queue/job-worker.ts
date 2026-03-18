@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
-import { logging } from "../../infra/logging/index.js";
-import { runQueuedReviewJob } from "../runtime.js";
-import type { ReviewJobStore } from "./job-store.js";
+import { logging } from "../../infra/logging/index";
+import { runQueuedReviewJob } from "../runtime";
+import type { ReviewJobStore } from "./job-store";
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);

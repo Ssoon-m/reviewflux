@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { AppConfig } from "../src/config/env.js";
+import type { AppConfig } from "../src/config/env";
 import {
   buildModelAliasIndex,
   modelKey,
@@ -7,9 +7,9 @@ import {
   parseModelRef,
   resolveModelRefFromString,
   resolveRequestedModelRef,
-} from "../src/llm/model-selection.js";
-import { normalizeProviderId } from "../src/llm/provider-normalizer.js";
-import { normalizeProviderModelId } from "../src/llm/models-config.providers.js";
+} from "../src/llm/model-selection";
+import { normalizeProviderId } from "../src/llm/provider-normalizer";
+import { normalizeProviderModelId } from "../src/llm/models-config.providers";
 
 function makeConfig(patch: Partial<AppConfig>): AppConfig {
   return {

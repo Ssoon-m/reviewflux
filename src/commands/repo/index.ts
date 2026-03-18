@@ -1,12 +1,12 @@
-import { Command } from "commander";
+import type { Command } from "commander";
 import {
   resolveCommandBuilderDependencies,
   type CommandBuilderDependencies,
-} from "../../cli/command-builder.js";
-import { runRepoAddCommand } from "./add.js";
-import { runRepoListCommand } from "./list.js";
-import { runRepoRemoveCommand } from "./remove.js";
-import { runRepoSetModelCommand } from "./set-model.js";
+} from "../../cli/command-builder";
+import { runRepoAddCommand } from "./add";
+import { runRepoListCommand } from "./list";
+import { runRepoRemoveCommand } from "./remove";
+import { runRepoSetModelCommand } from "./set-model";
 
 export type RepoCommandHandlers = {
   runRepoAddCommand: typeof runRepoAddCommand;

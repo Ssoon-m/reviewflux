@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { normalizeRootArgs } from "../src/cli/root-args.js";
+import { normalizeRootArgs } from "../src/cli/root-args";
 
 describe("normalizeRootArgs", () => {
   const groupCommandNames = new Set(["repo", "daemon"]);

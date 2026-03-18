@@ -1,4 +1,4 @@
-import { loadConfig } from "../../cli/config.js";
+import { loadConfig } from "../../cli/config";
 
 export async function runRepoListCommand(): Promise<void> {
   const config = loadConfig();

@@ -1,11 +1,13 @@
 ## CODING CONVENTION
 
 ### Imports
-- Use ESM imports with explicit `.js` suffixes for local files because the repo is `module: NodeNext`.
+- Use extensionless ESM imports for local files. The repo checks source with bundler-style module resolution and lets the build pipeline emit runtime-safe module specifiers.
 - Use `node:` prefixes for Node builtins (`node:fs`, `node:path`, `node:timers/promises`).
 - Keep imports grouped in this order when practical: Node builtins -> external packages -> internal modules.
 - Use `import type` or inline `type` specifiers for type-only imports.
 - Prefer named exports; the codebase rarely uses default exports.
+- Architecture import boundaries are defined in `.dependency-cruiser.cjs`; both `pnpm depcruise` and `pnpm lint` should surface those violations from that single config.
+- Local commits should pass `pnpm validate:pre-commit`; the Husky `pre-commit` hook runs that command automatically after install.
 
 ### Formatting
 - Use double quotes and semicolons consistently.

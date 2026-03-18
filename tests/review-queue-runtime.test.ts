@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import {
   ReviewQueueDatabase,
   supportsReviewQueueNodeVersion,
-} from "../src/review/queue/database.js";
+} from "../src/review/queue/database";
 
 function withProcessNodeVersion<T>(version: string, run: () => T): T {
   const originalVersions = process.versions;

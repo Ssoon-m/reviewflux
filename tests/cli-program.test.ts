@@ -1,8 +1,8 @@
 import { CommanderError } from "commander";
 import { describe, expect, it, vi } from "vitest";
-import { resolveCommandBuilderDependencies } from "../src/cli/command-builder.js";
-import { buildProgram } from "../src/cli/program.js";
-import { createCommanderTestHarness } from "./commander-test-harness.js";
+import { resolveCommandBuilderDependencies } from "../src/cli/command-builder";
+import { buildProgram } from "../src/cli/program";
+import { createCommanderTestHarness } from "./commander-test-harness";
 
 describe("cli-program", () => {
   it("builds the Commander root program", () => {

@@ -1,4 +1,4 @@
-import { Command } from "commander";
+import type { Command } from "commander";
 
 export const PROGRAM_NAME = "reviewflux";
 export const PROGRAM_DESCRIPTION = "CLI-first event-driven review runtime";

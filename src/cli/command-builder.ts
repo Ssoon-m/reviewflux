@@ -1,6 +1,6 @@
 import type { Command } from "commander";
 
-export type CommandHandler = (...args: any[]) => void | Promise<void>;
+export type CommandHandler = (...args: never[]) => void | Promise<void>;
 
 export type CommandHandlerMap = Record<string, CommandHandler>;
 

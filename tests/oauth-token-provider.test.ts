@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { OAuthTokenProvider } from "../src/auth/oauth-token-provider.js";
+import { OAuthTokenProvider } from "../src/auth/oauth-token-provider";
 
 describe("OAuthTokenProvider", () => {
   it("caches token and avoids duplicate fetches", async () => {

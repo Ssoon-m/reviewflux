@@ -2,13 +2,13 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { ReviewFluxConfig } from "../src/cli/config.js";
+import type { ReviewFluxConfig } from "../src/cli/config";
 import {
   runDaemonCycle,
   runDaemonStartCommand,
-} from "../src/commands/daemon/start.js";
-import { reviewQueuePath } from "../src/review/queue/index.js";
-import type { ProjectConfig } from "../src/review/types.js";
+} from "../src/commands/daemon/start";
+import { reviewQueuePath } from "../src/review/queue/index";
+import type { ProjectConfig } from "../src/review/types";
 
 type DaemonLogRecord = {
   ts: string;

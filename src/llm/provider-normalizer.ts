@@ -1,6 +1,6 @@
 import { getProviders } from "@mariozechner/pi-ai";
-import type { LlmProviderName } from "./types.js";
-import { isCustomProviderId } from "./custom-provider.js";
+import type { LlmProviderName } from "./types";
+import { isCustomProviderId } from "./custom-provider";
 
 /** Normalize and validate provider id: pi-ai getProviders() or custom-openai/custom-anthropic. */
 export function normalizeProviderId(raw: string): LlmProviderName {

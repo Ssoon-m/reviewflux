@@ -10,9 +10,14 @@
     "build": "tsdown",
     "check": "tsc --noEmit -p tsconfig.json",
     "dev": "node scripts/run-node.mjs",
+    "depcruise": "depcruise --validate .dependency-cruiser.cjs src",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "prepare": "husky",
     "reviewflux": "node scripts/run-node.mjs",
     "test": "vitest run",
-    "test:all": "pnpm build && pnpm check && pnpm test"
+    "test:all": "pnpm build && pnpm check && pnpm lint && pnpm depcruise && pnpm test",
+    "validate:pre-commit": "pnpm check && pnpm lint && pnpm depcruise"
   },
   "repository": {
     "type": "git",
@@ -39,12 +44,18 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@types/better-sqlite3": "^7.6.13",
     "@types/express": "^5.0.6",
     "@types/node": "^25.3.0",
+    "dependency-cruiser": "^17.3.9",
+    "eslint": "^10.0.3",
+    "globals": "^17.4.0",
+    "husky": "^9.1.7",
     "tsdown": "^0.20.3",
     "tsx": "^4.21.0",
     "typescript": "^5.9.3",
+    "typescript-eslint": "^8.57.1",
     "vitest": "^4.0.18"
   },
   "packageManager": "pnpm@10.30.3"

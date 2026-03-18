@@ -1,9 +1,9 @@
-import type { ReviewQueueDatabase } from "./database.js";
+import type { ReviewQueueDatabase } from "./database";
 import type {
   EnqueueReviewJobInput,
   ReviewJobRecord,
   ReviewJobStatus,
-} from "./types.js";
+} from "./types";
 
 function nowIso(): string {
   return new Date().toISOString();

@@ -15,7 +15,7 @@ import {
   ReviewJobStore,
   ReviewJobWorker,
   ReviewQueueDatabase,
-} from "../src/review/queue/index.js";
+} from "../src/review/queue/index";
 
 type WorkerLogContext = Record<string, string | number | boolean | undefined>;
 type WorkerLogRecord = {

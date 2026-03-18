@@ -1,5 +1,5 @@
-import type { ReviewQueueDatabase } from "./database.js";
-import type { ProjectPollSnapshot } from "./types.js";
+import type { ReviewQueueDatabase } from "./database";
+import type { ProjectPollSnapshot } from "./types";
 
 function nowIso(): string {
   return new Date().toISOString();

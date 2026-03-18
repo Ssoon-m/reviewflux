@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { CommanderError } from "commander";
-import { buildProgram } from "./program.js";
-import { normalizeRootArgs } from "./root-args.js";
+import { buildProgram } from "./program";
+import { normalizeRootArgs } from "./root-args";
 
 function applyExitOverride(command: import("commander").Command): void {
   command.exitOverride();

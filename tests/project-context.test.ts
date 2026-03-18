@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildProjectContextText } from "../src/llm/project-context.js";
+import { buildProjectContextText } from "../src/llm/project-context";
 
 describe("project context", () => {
   it("uses AGENTS.md by default", () => {

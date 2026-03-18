@@ -1,8 +1,8 @@
 import { chmodSync, existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { ensureReviewFluxHome, getReviewFluxPath } from "../config/reviewflux-home.js";
+import { ensureReviewFluxHome, getReviewFluxPath } from "../config/reviewflux-home";
 
-export { ensureReviewFluxHome, getReviewFluxHome } from "../config/reviewflux-home.js";
+export { ensureReviewFluxHome, getReviewFluxHome } from "../config/reviewflux-home";
 
 export type AuthMode = "oauth" | "apikey";
 
@@ -129,7 +129,7 @@ export function saveConfig(config: ReviewFluxConfig, home: string = homedir()): 
   const path = getConfigPath(home);
   const authPath = getAuthStorePath(home);
 
-  const { auth, oauth, apiKey, ...configWithoutSecrets } = config;
+  const { auth, oauth: _oauth, apiKey, ...configWithoutSecrets } = config;
 
   writeAuthStoreFile({ authPath, auth, apiKey });
   writeConfigFile(path, configWithoutSecrets);

@@ -3,8 +3,8 @@ import { describe, expect, it, vi } from "vitest";
 import {
   buildSetupCommand,
   runSetupFlow,
-} from "../src/commands/setup/index.js";
-import { createCommanderTestHarness } from "./commander-test-harness.js";
+} from "../src/commands/setup/index";
+import { createCommanderTestHarness } from "./commander-test-harness";
 
 function createSetupHarness(runSetup = vi.fn(async () => {})) {
   return {

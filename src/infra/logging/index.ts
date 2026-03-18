@@ -1,6 +1,6 @@
 import { appendFileSync, chmodSync, mkdirSync, readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { ensureReviewFluxLogsDir } from "../../config/reviewflux-home.js";
+import { ensureReviewFluxLogsDir } from "../../config/reviewflux-home";
 
 const LOGGING_SURFACES = [
   "setup",

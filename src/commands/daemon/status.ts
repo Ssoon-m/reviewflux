@@ -1,9 +1,9 @@
-import { logging } from "../../infra/logging/index.js";
+import { logging } from "../../infra/logging/index";
 import {
   ReviewJobStore,
   ReviewQueueDatabase,
   reviewQueuePath,
-} from "../../review/queue/index.js";
+} from "../../review/queue/index";
 
 function resolvePositiveInt(raw: string | undefined, fallback: number): number {
   const parsed = Number.parseInt(raw ?? "", 10);

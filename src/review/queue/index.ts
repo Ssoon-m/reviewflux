@@ -2,19 +2,19 @@ export {
   assertReviewQueueRuntimeSupported,
   ReviewQueueDatabase,
   reviewQueuePath,
-} from "./database.js";
+} from "./database";
 export {
   buildAutomaticReviewEventKey,
   buildManualReviewEventKey,
-} from "./event-key.js";
-export { ReviewJobStore } from "./job-store.js";
-export { ReviewJobWorker } from "./job-worker.js";
-export { ReviewPollCoordinator } from "./poll-coordinator.js";
-export { ReviewPollStateStore } from "./poll-state-store.js";
+} from "./event-key";
+export { ReviewJobStore } from "./job-store";
+export { ReviewJobWorker } from "./job-worker";
+export { ReviewPollCoordinator } from "./poll-coordinator";
+export { ReviewPollStateStore } from "./poll-state-store";
 export type {
   EnqueueReviewJobInput,
   ProjectPollSnapshot,
   ReviewJobPayload,
   ReviewJobRecord,
   ReviewJobStatus,
-} from "./types.js";
+} from "./types";

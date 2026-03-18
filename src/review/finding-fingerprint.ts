@@ -1,4 +1,4 @@
-import { stripReviewCommentTitle } from "../contracts/review-comment-format.js";
+import { stripReviewCommentTitle } from "../contracts/review-comment-format";
 
 function normalizeText(value: string): string {
   return value.replace(/\s+/g, " ").trim().toLowerCase();

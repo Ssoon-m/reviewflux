@@ -8,7 +8,7 @@ import type {
   ProjectConfig,
   PullRequestSummary,
   PullReviewComment,
-} from "../src/review/types.js";
+} from "../src/review/types";
 
 const mocks = vi.hoisted(() => ({
   fetchIssueInfoMock: vi.fn(),
@@ -36,7 +36,7 @@ import {
   ReviewPollCoordinator,
   ReviewPollStateStore,
   ReviewQueueDatabase,
-} from "../src/review/queue/index.js";
+} from "../src/review/queue/index";
 
 function makeTempHome(): string {
   return mkdtempSync(join(tmpdir(), "reviewflux-poll-"));

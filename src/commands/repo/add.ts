@@ -1,11 +1,11 @@
-import { promptSelect, promptText } from "../../cli/clack-prompter.js";
-import { loadConfig, saveConfig, type ReviewFluxConfig } from "../../cli/config.js";
+import { promptSelect, promptText } from "../../cli/clack-prompter";
+import { loadConfig, saveConfig, type ReviewFluxConfig } from "../../cli/config";
 import {
   normalizeRepoInput,
   type PrReviewMode,
-} from "../../lib/repo/input.js";
-import { getSelectableModelsForProvider } from "../../llm/provider-catalog.js";
-import { ensureProviderCredentials, pickRepoProvider } from "./shared.js";
+} from "../../lib/repo/input";
+import { getSelectableModelsForProvider } from "../../llm/provider-catalog";
+import { ensureProviderCredentials, pickRepoProvider } from "./shared";
 
 async function resolveRepoModelSelection(
   config: ReviewFluxConfig,

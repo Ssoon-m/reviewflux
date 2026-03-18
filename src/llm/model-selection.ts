@@ -1,9 +1,9 @@
 import { getModel } from "@mariozechner/pi-ai";
-import type { AppConfig } from "../config/env.js";
-import { isCustomProviderId } from "./custom-provider.js";
-import type { ModelRef } from "./model-ref.js";
-import { isModelSupported, normalizeProviderModelId, resolveProviderModelCatalog } from "./models-config.providers.js";
-import { normalizeProviderId } from "./provider-normalizer.js";
+import type { AppConfig } from "../config/env";
+import { isCustomProviderId } from "./custom-provider";
+import type { ModelRef } from "./model-ref";
+import { isModelSupported, normalizeProviderModelId, resolveProviderModelCatalog } from "./models-config.providers";
+import { normalizeProviderId } from "./provider-normalizer";
 
 export type ModelAliasIndex = {
   byAlias: Map<string, ModelRef>;

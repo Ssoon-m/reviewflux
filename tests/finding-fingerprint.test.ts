@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createFindingFingerprint } from "../src/review/finding-fingerprint.js";
+import { createFindingFingerprint } from "../src/review/finding-fingerprint";
 
 describe("finding fingerprint", () => {
   it("matches identical findings regardless of title wrapper", () => {

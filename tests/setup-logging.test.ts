@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   runSetupFlow,
   type SetupFlowCollaborators,
-} from "../src/commands/setup/index.js";
+} from "../src/commands/setup/index";
 
 type SetupLogRecord = {
   ts: string;

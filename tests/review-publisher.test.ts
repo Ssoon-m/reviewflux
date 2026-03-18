@@ -5,7 +5,7 @@ import {
   type PublishReviewContext,
   type ReviewFinding,
   type ReviewPublisherAdapter,
-} from "../src/gateway/review-publisher.js";
+} from "../src/gateway/review-publisher";
 
 function makeContext(findings: ReviewFinding[] = []): PublishReviewContext {
   return {
