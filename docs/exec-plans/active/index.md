@@ -1,3 +1,3 @@
 # Active Execution Plans
 
-No active execution plans are tracked here currently.
+- `docs/exec-plans/active/changesets-release-automation.md` - Adds Changesets version management and GitHub Actions npm release automation for the CLI package.

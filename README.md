@@ -87,3 +87,18 @@ rvw repo add
 # 3. Start the daemon
 rvw daemon start
 ```
+
+## Maintainer Release Flow
+
+```bash
+# 1. Record the version intent in the feature branch
+pnpm changeset
+```
+
+Merge that PR into `main`. The release workflow will open or update a release PR with the version and changelog changes.
+
+When the release PR is merged, GitHub Actions will run the release checks and publish the package to npm.
+
+Set the repository `NPM_TOKEN` secret before relying on the workflow publish step.
+
+If you need a local fallback instead of the workflow, run `pnpm version-packages`, review the generated changes, then run `pnpm release`. That local publish path requires npm publish credentials that satisfy your package's 2FA policy.
