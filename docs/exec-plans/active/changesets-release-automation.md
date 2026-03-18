@@ -6,7 +6,7 @@ Maintain this file in accordance with `docs/PLANS.md`. It must remain self-conta
 
 ## Purpose / Big Picture
 
-After this change, ReviewFlux should have a concrete, repeatable release path for its npm CLI package. Maintainers should be able to record version intent with Changesets, let GitHub Actions open or update a release PR, and publish to npm through a trusted workflow instead of manually editing versions by hand.
+After this change, ReviewFlux should have a concrete, repeatable release path for its npm CLI package. Maintainers should be able to record version intent with Changesets, tag a validated `main` commit, and publish to npm through a trusted workflow instead of manually editing versions by hand.
 
 ## Progress
 
@@ -45,7 +45,7 @@ ReviewFlux is a single-package pnpm-based TypeScript CLI. The publishable packag
 
 First, stabilize package-level release metadata. `package.json` needs Changesets scripts that match the existing `pnpm build` / `pnpm test:all` release posture, and it must continue to publish `src/commands/setup/REVIEWFLUX-AGENTS.md` alongside `dist/`.
 
-Second, add the workflow automation. The workflow should fit a single-package repo: check out the repo, set up pnpm and Node, install dependencies, run the repo's existing validation command, and use Changesets to either open/update a release PR or publish to npm when a prepared release commit lands on the base branch. The workflow should request only the permissions needed for PR updates and npm trusted publishing.
+Second, add the workflow automation. The workflow should fit a single-package repo: check out the repo, set up pnpm and Node, install dependencies, run the repo's existing validation command, and publish to npm only when a matching `v*` tag points at a commit already reachable from `main`. The workflow should request only the permissions needed for read access and npm trusted publishing.
 
 Third, verify the release path with observable evidence. That includes local package checks (`pnpm test:all`, `npm pack --dry-run --json`), Changesets CLI checks, and syntax validation of the workflow file plus manual execution of the same commands the workflow relies on.
 
