@@ -23,6 +23,16 @@ describe("cli-program", () => {
     expect(stdout).toContain("Usage: rvw");
     expect(stdout).toContain("help [command]");
     expect(stdout).toContain("repo");
+    expect(stdout).toContain("-V, --version");
+  });
+
+  it("shows the package version from the Commander runtime", async () => {
+    const harness = createCommanderTestHarness(buildProgram);
+    const { error, stdout } = await harness.run(["--version"]);
+
+    expect(error).toBeInstanceOf(CommanderError);
+    expect((error as CommanderError).code).toBe("commander.version");
+    expect(stdout.trim()).toBe("0.1.0");
   });
 
   it("shows root help when the help command is invoked without a topic", async () => {
