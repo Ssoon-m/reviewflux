@@ -17,7 +17,8 @@
     "reviewflux": "node scripts/run-node.mjs",
     "test": "vitest run",
     "test:all": "pnpm build && pnpm check && pnpm lint && pnpm depcruise && pnpm test",
-    "validate:pre-commit": "pnpm check && pnpm lint && pnpm depcruise"
+    "validate:pre-commit": "pnpm check && pnpm lint && pnpm depcruise",
+    "validate:pre-push": "pnpm check"
   },
   "repository": {
     "type": "git",

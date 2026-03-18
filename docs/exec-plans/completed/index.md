@@ -9,6 +9,6 @@
 - `docs/exec-plans/completed/eslint-and-dependency-cruiser-adoption.md` - adopt ESLint and dependency-cruiser so code quality and documented boundary rules are enforced automatically.
 - `docs/exec-plans/completed/eslint-dependency-cruiser-editor-integration.md` - surface `.dependency-cruiser.cjs` boundary violations through ESLint so editors show the same architectural errors as `pnpm depcruise`.
 - `docs/exec-plans/completed/extensionless-local-imports-adoption.md` - switch the repo to extensionless local imports while keeping build, lint, boundary validation, and tests green.
-- `docs/exec-plans/completed/pre-commit-validation-hook.md` - install Husky so local commits run type-checking, lint, and dependency-cruiser validation before the commit is created.
+- `docs/exec-plans/completed/commit-and-push-validation-hooks.md` - install Husky so local commits run type-checking, lint, and dependency-cruiser validation, and local pushes rerun type-checking before leaving the machine.
 
 Use this directory to index plans that are no longer in flight but still explain why the current implementation looks the way it does.

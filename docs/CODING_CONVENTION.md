@@ -8,6 +8,7 @@
 - Prefer named exports; the codebase rarely uses default exports.
 - Architecture import boundaries are defined in `.dependency-cruiser.cjs`; both `pnpm depcruise` and `pnpm lint` should surface those violations from that single config.
 - Local commits should pass `pnpm validate:pre-commit`; the Husky `pre-commit` hook runs that command automatically after install.
+- Local pushes should pass `pnpm validate:pre-push`; the Husky `pre-push` hook currently reruns type-checking before the push is sent.
 
 ### Formatting
 - Use double quotes and semicolons consistently.
