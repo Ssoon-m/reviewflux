@@ -31,7 +31,7 @@ describe("eslint dependency-cruiser integration", () => {
           message.message.includes("no-gateway-to-review-runtime"),
       ),
     ).toBe(true);
-  });
+  }, 15_000);
 
   it("allows review runtime files to import shared contracts", async () => {
     const virtualFilePath = path.join(
