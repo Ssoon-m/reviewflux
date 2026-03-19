@@ -83,14 +83,41 @@ jobs:
       - name: Verify package contents
         run: npm pack --dry-run --json
 
+      - name: Resolve npm dist-tag
+        id: publish_meta
+        run: |
+          set -euo pipefail
+          PACKAGE_VERSION=$(node -p "require('./package.json').version")
+          DIST_TAG=""
+
+          if [[ "${PACKAGE_VERSION}" == *-* ]]; then
+            DIST_TAG=$(printf '%s' "${PACKAGE_VERSION#*-}" | cut -d'.' -f1)
+            DIST_TAG=${DIST_TAG:-next}
+          fi
+
+          echo "package_version=${PACKAGE_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "dist_tag=${DIST_TAG}" >> "$GITHUB_OUTPUT"
+
+          if [[ -n "${DIST_TAG}" ]]; then
+            echo "Publishing prerelease reviewflux@${PACKAGE_VERSION} with npm dist-tag '${DIST_TAG}'."
+          else
+            echo "Publishing stable reviewflux@${PACKAGE_VERSION} with npm dist-tag 'latest'."
+          fi
+
       - name: Publish package
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           set -euo pipefail
 
-          if [[ -n "${NODE_AUTH_TOKEN:-}" ]]; then
-            npm publish --provenance
+          if [[ -n "${{ steps.publish_meta.outputs.dist_tag }}" ]]; then
+            TAG_ARGS=(--tag "${{ steps.publish_meta.outputs.dist_tag }}")
           else
-            npm publish
+            TAG_ARGS=()
+          fi
+
+          if [[ -n "${NODE_AUTH_TOKEN:-}" ]]; then
+            npm publish --provenance "${TAG_ARGS[@]}"
+          else
+            npm publish "${TAG_ARGS[@]}"
           fi
