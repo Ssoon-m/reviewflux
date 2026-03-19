@@ -1,3 +1,3 @@
 # Active Execution Plans
 
-No active execution plans are tracked here currently.
+- `docs/exec-plans/active/adaptive-polling-and-targeted-re-poll.md` - Reduce repo-wide polling cost with cheap detect passes, targeted PR refreshes, and slower manual-trigger backstop scans.

@@ -1,0 +1,123 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+concurrency:
+  group: reviewflux-release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  NODE_VERSION: "22.14.0"
+  PNPM_VERSION: "10.30.3"
+
+jobs:
+  release:
+    if: github.repository == 'Ssoon-m/reviewflux'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Validate release tag
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+
+          if [[ ! "${RELEASE_TAG}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "Invalid release tag format: ${RELEASE_TAG}"
+            exit 1
+          fi
+
+          PACKAGE_VERSION=$(node -p "require('./package.json').version")
+          TAG_VERSION="${RELEASE_TAG#v}"
+
+          if [[ "${TAG_VERSION}" != "${PACKAGE_VERSION}" ]]; then
+            echo "Release tag ${RELEASE_TAG} does not match package version ${PACKAGE_VERSION}."
+            exit 1
+          fi
+
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+
+          if ! git merge-base --is-ancestor "${GITHUB_SHA}" origin/main; then
+            echo "Release tag ${RELEASE_TAG} must point to a commit on main."
+            exit 1
+          fi
+
+      - name: Ensure version is not already published
+        run: |
+          set -euo pipefail
+          PACKAGE_VERSION=$(node -p "require('./package.json').version")
+
+          if npm view "reviewflux@${PACKAGE_VERSION}" version >/dev/null 2>&1; then
+            echo "reviewflux@${PACKAGE_VERSION} is already published on npm."
+            exit 1
+          fi
+
+      - name: Validate release
+        run: pnpm test:all
+
+      - name: Verify package contents
+        run: npm pack --dry-run --json
+
+      - name: Resolve npm dist-tag
+        id: publish_meta
+        run: |
+          set -euo pipefail
+          PACKAGE_VERSION=$(node -p "require('./package.json').version")
+          DIST_TAG=""
+
+          if [[ "${PACKAGE_VERSION}" == *-* ]]; then
+            DIST_TAG=$(printf '%s' "${PACKAGE_VERSION#*-}" | cut -d'.' -f1)
+            DIST_TAG=${DIST_TAG:-next}
+          fi
+
+          echo "package_version=${PACKAGE_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "dist_tag=${DIST_TAG}" >> "$GITHUB_OUTPUT"
+
+          if [[ -n "${DIST_TAG}" ]]; then
+            echo "Publishing prerelease reviewflux@${PACKAGE_VERSION} with npm dist-tag '${DIST_TAG}'."
+          else
+            echo "Publishing stable reviewflux@${PACKAGE_VERSION} with npm dist-tag 'latest'."
+          fi
+
+      - name: Publish package
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          if [[ -n "${{ steps.publish_meta.outputs.dist_tag }}" ]]; then
+            TAG_ARGS=(--tag "${{ steps.publish_meta.outputs.dist_tag }}")
+          else
+            TAG_ARGS=()
+          fi
+
+          if [[ -n "${NODE_AUTH_TOKEN:-}" ]]; then
+            npm publish --provenance "${TAG_ARGS[@]}"
+          else
+            npm publish "${TAG_ARGS[@]}"
+          fi

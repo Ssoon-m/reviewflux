@@ -48,7 +48,7 @@ export async function runRepoAddCommand(): Promise<void> {
 
   const repoInput = await promptText({
     message: "GitHub repository (owner/repo or URL)",
-    placeholder: "Ssoon-m/reviewflux",
+    placeholder: "https://github.com/Ssoon-m/reviewflux",
   });
   const repo = normalizeRepoInput(repoInput);
 

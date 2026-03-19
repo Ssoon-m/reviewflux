@@ -1,8 +1,20 @@
+import { readFileSync } from "node:fs";
 import { CommanderError } from "commander";
 import { describe, expect, it, vi } from "vitest";
 import { resolveCommandBuilderDependencies } from "../src/cli/command-builder";
 import { buildProgram } from "../src/cli/program";
 import { createCommanderTestHarness } from "./commander-test-harness";
+
+function readPackageVersion(): string {
+  const raw = readFileSync(new URL("../package.json", import.meta.url), "utf8");
+  const parsed = JSON.parse(raw) as { version?: unknown };
+
+  if (typeof parsed.version !== "string" || parsed.version.length === 0) {
+    throw new Error("package_version_missing");
+  }
+
+  return parsed.version;
+}
 
 describe("cli-program", () => {
   it("builds the Commander root program", () => {
@@ -23,6 +35,16 @@ describe("cli-program", () => {
     expect(stdout).toContain("Usage: rvw");
     expect(stdout).toContain("help [command]");
     expect(stdout).toContain("repo");
+    expect(stdout).toContain("-V, --version");
+  });
+
+  it("shows the package version from the Commander runtime", async () => {
+    const harness = createCommanderTestHarness(buildProgram);
+    const { error, stdout } = await harness.run(["--version"]);
+
+    expect(error).toBeInstanceOf(CommanderError);
+    expect((error as CommanderError).code).toBe("commander.version");
+    expect(stdout.trim()).toBe(readPackageVersion());
   });
 
   it("shows root help when the help command is invoked without a topic", async () => {
