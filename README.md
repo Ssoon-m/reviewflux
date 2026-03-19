@@ -87,3 +87,26 @@ rvw repo add
 # 3. Start the daemon
 rvw daemon start
 ```
+
+## Maintainer Release Flow
+
+```bash
+# 1. Record the version intent in the feature branch
+pnpm changeset
+
+# 2. Prepare the release commit when you are ready
+pnpm version-packages
+```
+
+Merge the version bump commit into `main`, then create a tag that matches `package.json#version`.
+
+```bash
+git tag v0.1.1
+git push origin v0.1.1
+```
+
+That tag push runs the release checks and then publishes to npm in the same workflow.
+
+Enable npm trusted publishing for `.github/workflows/release.yml`, or set the repository `NPM_TOKEN` secret if you want the workflow to publish with a token.
+
+If you need a local fallback instead of the workflow, run `pnpm release` after `pnpm version-packages`. That local publish path requires npm publish credentials that satisfy your package's 2FA policy.
