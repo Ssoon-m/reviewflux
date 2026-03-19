@@ -10,7 +10,7 @@ ReviewFlux listens for pull request activity. When a PR is opened, updated, or m
 
 ## How It Works
 
-Current runtime flow for GitHub looks like this:
+Current runtime flow looks like this:
 
 ```text
 (PR opened, new commits, manual review trigger)
