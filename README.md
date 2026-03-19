@@ -14,8 +14,8 @@ Current runtime flow for GitHub looks like this:
 
 ```text
 (PR opened, new commits, manual review trigger)
-                │
-                ▼
+                  │
+                  ▼
 ┌───────────────────────────────────────────────┐
 │         ReviewFlux daemon (`rvw daemon`)      │
 │                 polling loop                  │
@@ -29,20 +29,20 @@ Current runtime flow for GitHub looks like this:
                   │
                   ▼
 ┌───────────────────────────────────────────────┐
-│               Review runtime                 │
-│   loads PR diff, comments, and `AGENTS.md`   │
-└───────────────┬───────────────────┬───────────┘
-                │                   │
-                │                   └─ JSONL logs and local review state
-                ▼
+│               Review runtime                  │
+│   loads PR diff, comments, and `AGENTS.md`    │
+└─────────────────┬─────────────────┬───────────┘
+                  │                 │
+                  │                 └─ JSONL logs and local review state
+                  ▼
 ┌───────────────────────────────────────────────┐
-│                 LLM provider                 │
-│        analyzes changes and drafts review    │
+│                 LLM provider                  │
+│        analyzes changes and drafts review     │
 └─────────────────┬─────────────────────────────┘
                   ▼
 ┌───────────────────────────────────────────────┐
-│            Review posting gateway            │
-│      publishes summary and inline findings   │
+│            Review posting gateway             │
+│      publishes summary and inline findings    │
 └─────────────────┬─────────────────────────────┘
                   ▼
         ai review/comments
@@ -60,19 +60,24 @@ Current runtime flow for GitHub looks like this:
 > Features and command behavior may change.
 
 ## Requirements
+
 - Node.js `20.x` or `22+`
 - `pnpm@10.30.3`
 
 ## Install
+
 ```
 npm install -g reviewflux@latest
 ```
 
 This installs the preferred `rvw` command and keeps `reviewflux` as a compatibility alias.
 
-> If `gh` is not installed yet, install GitHub CLI and run `gh auth login`
+> [!IMPORTANT]
+> ReviewFlux depends on GitHub CLI (`gh`) for repository lookup and authentication.  
+> If `gh` is not installed yet, install it first and run `gh auth login` before `rvw setup`.
 
 ## Quick Start
+
 ```bash
 # Install
 pnpm install
@@ -87,3 +92,18 @@ rvw repo add
 # 3. Start the daemon
 rvw daemon start
 ```
+
+### `rvw` quick reference
+
+| Stage | Command | Purpose |
+| --- | --- | --- |
+| Quick help | `rvw --help` | Show all top-level commands and global options |
+| Initial setup | `rvw setup` | Configure auth model and generate local config files |
+| Add repo | `rvw repo add` | Register a repository for review tracking |
+| List repos | `rvw repo list` | Check all currently tracked repositories |
+| Remove repo | `rvw repo remove` | Stop tracking a repository |
+| Set repo model | `rvw repo set-model` | Change the review model for a specific repo |
+| Start daemon | `rvw daemon start` | Start ReviewFlux background watcher |
+| Stop daemon | `rvw daemon stop <pid>` | Stop daemon process returned by `rvw daemon list` |
+| Daemon status | `rvw daemon status` | View daemon/service status |
+| List daemons | `rvw daemon list` | Show running daemon processes |
