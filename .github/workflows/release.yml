@@ -149,7 +149,6 @@ jobs:
 
       - name: Publish package
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           DIST_TAG: ${{ steps.release_meta.outputs.dist_tag }}
         run: |
           set -euo pipefail
