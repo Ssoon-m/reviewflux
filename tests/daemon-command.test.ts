@@ -16,7 +16,7 @@ function createDaemonHandlers(): DaemonCommandHandlers {
     runDaemonStartCommand: vi.fn(async () => {}),
     runDaemonStopCommand: vi.fn(async () => {}),
     runDaemonStatusCommand: vi.fn(async () => {}),
-    runDaemonInstallCommand: vi.fn(async () => {}),
+    runDaemonListCommand: vi.fn(async () => {}),
   };
 }
 
@@ -40,7 +40,7 @@ function expectNoDaemonHandlersCalled(handlers: DaemonCommandHandlers): void {
   expect(handlers.runDaemonStartCommand).not.toHaveBeenCalled();
   expect(handlers.runDaemonStopCommand).not.toHaveBeenCalled();
   expect(handlers.runDaemonStatusCommand).not.toHaveBeenCalled();
-  expect(handlers.runDaemonInstallCommand).not.toHaveBeenCalled();
+  expect(handlers.runDaemonListCommand).not.toHaveBeenCalled();
 }
 
 describe("daemon-command", () => {
@@ -48,7 +48,7 @@ describe("daemon-command", () => {
     ["start", "runDaemonStartCommand"],
     ["stop", "runDaemonStopCommand"],
     ["status", "runDaemonStatusCommand"],
-    ["install", "runDaemonInstallCommand"],
+    ["list", "runDaemonListCommand"],
   ] as const)("routes daemon %s to the injected handler", async (subcommand, handlerName) => {
     const { harness, handlers } = createDaemonHarness();
     const { error } = await harness.run(["daemon", subcommand]);
@@ -62,6 +62,15 @@ describe("daemon-command", () => {
     }
   });
 
+  it("routes daemon stop pid argument to handler", async () => {
+    const { harness, handlers } = createDaemonHarness();
+    const { error } = await harness.run(["daemon", "stop", "12345"]);
+
+    expect(error).toBeUndefined();
+    expect(handlers.runDaemonStopCommand).toHaveBeenCalledTimes(1);
+    expect(handlers.runDaemonStopCommand).toHaveBeenCalledWith("12345");
+  });
+
   it("shows daemon help without entering daemon handlers", async () => {
     const { harness, handlers } = createDaemonHarness();
     const { error, stdout } = await harness.run(["help", "daemon"]);
@@ -69,7 +78,7 @@ describe("daemon-command", () => {
     expect(error).toBeInstanceOf(CommanderError);
     expect((error as CommanderError).code).toBe("commander.help");
     expect(stdout).toContain("Usage: rvw daemon");
-    expect(stdout).toContain("install");
+    expect(stdout).toContain("list");
     expectNoDaemonHandlersCalled(handlers);
   });
 

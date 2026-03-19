@@ -1,6 +1,5 @@
-import { promptSelect, promptText } from "../../cli/clack-prompter";
+import { promptSelect } from "../../cli/clack-prompter";
 import { loadConfig, saveConfig, type ReviewFluxConfig } from "../../cli/config";
-import { normalizeRepoInput } from "../../lib/repo/input";
 import { getSelectableModelsForProvider } from "../../llm/provider-catalog";
 import { ensureProviderCredentials, pickRepoProvider } from "./shared";
 
@@ -10,6 +9,34 @@ function resolveLegacyRepoModel(params: {
 }): { provider: string; model: string } | undefined {
   if (!params.modelAlias) return undefined;
   return params.config.modelAliases?.[params.modelAlias];
+}
+
+function getTrackedRepoOptions(config: ReviewFluxConfig): Array<{ label: string; value: string }> {
+  const projects = config.projects;
+  if (!projects) return [];
+
+  return Object.entries(projects)
+    .map(([repo, project]) => {
+      const model = project.model ? `${project.model.provider}/${project.model.model}` : "<default>";
+      return {
+        value: repo,
+        label: `${repo} (${model})`,
+      };
+    })
+    .sort((a, b) => a.value.localeCompare(b.value));
+}
+
+async function pickTrackedRepo(config: ReviewFluxConfig): Promise<string> {
+  const options = getTrackedRepoOptions(config);
+  if (options.length === 0) {
+    throw new Error("no_tracked_repos");
+  }
+
+  return promptSelect({
+    message: "Select a tracked repository",
+    options,
+    initialValue: options[0]!.value,
+  });
 }
 
 async function pickRepoModel(
@@ -55,12 +82,7 @@ async function pickRepoModel(
 
 export async function runRepoSetModelCommand(): Promise<void> {
   const config = loadConfig();
-
-  const repoInput = await promptText({
-    message: "Repository (owner/repo or URL)",
-    placeholder: "Ssoon-m/reviewflux",
-  });
-  const repo = normalizeRepoInput(repoInput);
+  const repo = await pickTrackedRepo(config);
 
   const repoConfigs = { ...(config.projects ?? {}) };
   const target = repoConfigs[repo];
@@ -85,5 +107,7 @@ export async function runRepoSetModelCommand(): Promise<void> {
   saveConfig(config);
 
   console.log(`[reviewflux] repository model updated: ${repo}`);
-  console.log(`[reviewflux] model: ${repoModel ? `${repoModel.provider}/${repoModel.model}` : "<default>"}`);
+  console.log(
+    `[reviewflux] model: ${repoModel ? `${repoModel.provider}/${repoModel.model}` : "<default>"}`,
+  );
 }

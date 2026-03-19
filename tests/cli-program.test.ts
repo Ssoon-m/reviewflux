@@ -87,7 +87,7 @@ describe("cli-program", () => {
     expect(error).toBeInstanceOf(CommanderError);
     expect((error as CommanderError).code).toBe("commander.help");
     expect(output).toContain("Usage: rvw daemon");
-    expect(output).toContain("install");
+    expect(output).toContain("list");
   });
 
   it("reports unknown root commands without exiting the process", async () => {

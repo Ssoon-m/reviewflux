@@ -7,13 +7,13 @@ import {
 type RunDaemonStartCommand = (typeof import("./start"))["runDaemonStartCommand"];
 type RunDaemonStopCommand = (typeof import("./stop"))["runDaemonStopCommand"];
 type RunDaemonStatusCommand = (typeof import("./status"))["runDaemonStatusCommand"];
-type RunDaemonInstallCommand = (typeof import("./install"))["runDaemonInstallCommand"];
+type RunDaemonListCommand = (typeof import("./list"))["runDaemonListCommand"];
 
 export type DaemonCommandHandlers = {
   runDaemonStartCommand: RunDaemonStartCommand;
   runDaemonStopCommand: RunDaemonStopCommand;
   runDaemonStatusCommand: RunDaemonStatusCommand;
-  runDaemonInstallCommand: RunDaemonInstallCommand;
+  runDaemonListCommand: RunDaemonListCommand;
 };
 
 export type DaemonCommandDependencies = CommandBuilderDependencies<
@@ -35,16 +35,16 @@ export const runDaemonStatusCommand: RunDaemonStatusCommand = async (...args) =>
   await module.runDaemonStatusCommand(...args);
 };
 
-export const runDaemonInstallCommand: RunDaemonInstallCommand = async (...args) => {
-  const module = await import("./install");
-  await module.runDaemonInstallCommand(...args);
+export const runDaemonListCommand: RunDaemonListCommand = async (...args) => {
+  const module = await import("./list");
+  await module.runDaemonListCommand(...args);
 };
 
 const defaultDaemonCommandHandlers: DaemonCommandHandlers = {
   runDaemonStartCommand,
   runDaemonStopCommand,
   runDaemonStatusCommand,
-  runDaemonInstallCommand,
+  runDaemonListCommand,
 };
 
 export function buildDaemonCommand(
@@ -63,17 +63,21 @@ export function buildDaemonCommand(
   daemon.command("start").description("start the background daemon").action(async () => {
     await handlers.runDaemonStartCommand();
   });
-  daemon.command("stop").description("stop the background daemon").action(async () => {
-    await handlers.runDaemonStopCommand();
-  });
+  daemon
+    .command("stop")
+    .description("stop the background daemon")
+    .argument("[pid]", "daemon process id from `rvw daemon list`")
+    .action(async (pid: string) => {
+      await handlers.runDaemonStopCommand(pid);
+    });
   daemon
     .command("status")
     .description("show background daemon status")
     .action(async () => {
       await handlers.runDaemonStatusCommand();
     });
-  daemon.command("install").description("install the daemon service").action(async () => {
-    await handlers.runDaemonInstallCommand();
+  daemon.command("list").description("list running daemon processes").action(async () => {
+    await handlers.runDaemonListCommand();
   });
 
   return program;
