@@ -9,7 +9,6 @@
   "scripts": {
     "build": "tsdown",
     "check": "tsc --noEmit -p tsconfig.json",
-    "changeset": "changeset",
     "dev": "node scripts/run-node.mjs",
     "depcruise": "depcruise --validate .dependency-cruiser.cjs src",
     "lint": "eslint .",
@@ -17,14 +16,12 @@
     "prepack": "pnpm build",
     "prepublishOnly": "pnpm test:all",
     "prepare": "husky",
-    "release": "changeset publish",
     "rvw": "node scripts/run-node.mjs",
     "reviewflux": "node scripts/run-node.mjs",
     "test": "vitest run",
     "test:all": "pnpm build && pnpm check && pnpm lint && pnpm depcruise && pnpm test",
     "validate:pre-commit": "pnpm check && pnpm lint && pnpm depcruise",
-    "validate:pre-push": "pnpm check",
-    "version-packages": "changeset version"
+    "validate:pre-push": "pnpm check"
   },
   "repository": {
     "type": "git",
@@ -58,7 +55,6 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
-    "@changesets/cli": "^2.30.0",
     "@eslint/js": "^10.0.1",
     "@types/better-sqlite3": "^7.6.13",
     "@types/express": "^5.0.6",
