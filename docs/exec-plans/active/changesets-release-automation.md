@@ -6,7 +6,7 @@ Maintain this file in accordance with `docs/PLANS.md`. It must remain self-conta
 
 ## Purpose / Big Picture
 
-After this change, ReviewFlux should have a concrete, repeatable release path for its npm CLI package. Maintainers should be able to record version intent with Changesets, tag a validated `main` commit, and let GitHub Actions publish to npm from that tag instead of manually editing versions by hand.
+After this change, ReviewFlux should have a concrete, repeatable release path for its npm CLI package. Maintainers should be able to record version intent with Changesets, tag a validated `main` commit, and let GitHub Actions publish stable tags to `latest` and prerelease tags to the matching npm dist-tag instead of manually editing versions by hand.
 
 ## Progress
 
@@ -35,7 +35,7 @@ After this change, ReviewFlux should have a concrete, repeatable release path fo
 
 ## Outcomes & Retrospective
 
-Changesets is now installed and wired into the repo's release surface. The package scripts expose `pnpm changeset`, `pnpm version-packages`, and `pnpm release`; the publish allowlist again includes `src/commands/setup/REVIEWFLUX-AGENTS.md`; a release workflow now validates and publishes matching `v*` tags that point to `main`; and the repo now has an initial changeset so `pnpm changeset status --verbose` resolves to a concrete patch release plan instead of a configuration error.
+Changesets is now installed and wired into the repo's release surface. The package scripts expose `pnpm changeset`, `pnpm version-packages`, and `pnpm release`; the publish allowlist again includes `src/commands/setup/REVIEWFLUX-AGENTS.md`; a release workflow now validates and publishes matching `v*` tags that point to `main`, deriving npm dist-tags for prereleases from the version suffix; and the repo now has an initial changeset so `pnpm changeset status --verbose` resolves to a concrete patch release plan instead of a configuration error.
 
 ## Context and Orientation
 
@@ -45,7 +45,7 @@ ReviewFlux is a single-package pnpm-based TypeScript CLI. The publishable packag
 
 First, stabilize package-level release metadata. `package.json` needs Changesets scripts that match the existing `pnpm build` / `pnpm test:all` release posture, and it must continue to publish `src/commands/setup/REVIEWFLUX-AGENTS.md` alongside `dist/`.
 
-Second, add the workflow automation. The workflow should fit a single-package repo: check out the repo, set up pnpm and Node, install dependencies, run the repo's existing validation command, and publish to npm when a matching `v*` tag already reachable from `main` is pushed. The workflow should request only the permissions needed for read access and npm trusted publishing.
+Second, add the workflow automation. The workflow should fit a single-package repo: check out the repo, set up pnpm and Node, install dependencies, run the repo's existing validation command, and publish to npm when a matching `v*` tag already reachable from `main` is pushed. Stable tags should publish to `latest`; prerelease tags should publish to an npm dist-tag derived from the prerelease label such as `beta`, `alpha`, or `rc`. The workflow should request only the permissions needed for read access and npm trusted publishing.
 
 Third, verify the release path with observable evidence. That includes local package checks (`pnpm test:all`, `npm pack --dry-run --json`), Changesets CLI checks, and syntax validation of the workflow file plus manual execution of the same commands the workflow relies on.
 
