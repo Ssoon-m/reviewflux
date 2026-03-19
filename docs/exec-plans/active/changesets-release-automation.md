@@ -6,14 +6,14 @@ Maintain this file in accordance with `docs/PLANS.md`. It must remain self-conta
 
 ## Purpose / Big Picture
 
-After this change, ReviewFlux should have a concrete, repeatable release path for its npm CLI package. Maintainers should be able to record version intent with Changesets, tag a validated `main` commit, preview the release on tag push, and publish to npm through a manually approved trusted workflow instead of manually editing versions by hand.
+After this change, ReviewFlux should have a concrete, repeatable release path for its npm CLI package. Maintainers should be able to record version intent with Changesets, tag a validated `main` commit, and let GitHub Actions publish to npm from that tag instead of manually editing versions by hand.
 
 ## Progress
 
 - [x] (2026-03-18 07:00Z) Installed `@changesets/cli` and initialized `.changeset/`.
 - [x] (2026-03-18 07:03Z) Confirmed there are no existing local workflow files under `.github/workflows/`.
 - [x] (2026-03-18 07:08Z) Added Changesets scripts to `package.json`, set `.changeset/config.json` access to `public`, and restored `src/commands/setup/REVIEWFLUX-AGENTS.md` to the publish allowlist.
-- [x] (2026-03-18 07:11Z) Added `.github/workflows/release.yml` for tag-driven npm release preview plus manual publish automation.
+- [x] (2026-03-18 07:11Z) Added `.github/workflows/release.yml` for tag-driven npm publish automation.
 - [x] (2026-03-18 07:15Z) Added `.changeset/few-hounds-relax.md` so the new release flow has a concrete release plan to process.
 - [x] (2026-03-18 07:18Z) Verified package contents, release commands, and workflow syntax/behavior proxies locally.
 
@@ -35,7 +35,7 @@ After this change, ReviewFlux should have a concrete, repeatable release path fo
 
 ## Outcomes & Retrospective
 
-Changesets is now installed and wired into the repo's release surface. The package scripts expose `pnpm changeset`, `pnpm version-packages`, and `pnpm release`; the publish allowlist again includes `src/commands/setup/REVIEWFLUX-AGENTS.md`; a release workflow now previews matching `v*` tags that point to `main` and publishes from an explicit manual dispatch on that tag; and the repo now has an initial changeset so `pnpm changeset status --verbose` resolves to a concrete patch release plan instead of a configuration error.
+Changesets is now installed and wired into the repo's release surface. The package scripts expose `pnpm changeset`, `pnpm version-packages`, and `pnpm release`; the publish allowlist again includes `src/commands/setup/REVIEWFLUX-AGENTS.md`; a release workflow now validates and publishes matching `v*` tags that point to `main`; and the repo now has an initial changeset so `pnpm changeset status --verbose` resolves to a concrete patch release plan instead of a configuration error.
 
 ## Context and Orientation
 
@@ -45,7 +45,7 @@ ReviewFlux is a single-package pnpm-based TypeScript CLI. The publishable packag
 
 First, stabilize package-level release metadata. `package.json` needs Changesets scripts that match the existing `pnpm build` / `pnpm test:all` release posture, and it must continue to publish `src/commands/setup/REVIEWFLUX-AGENTS.md` alongside `dist/`.
 
-Second, add the workflow automation. The workflow should fit a single-package repo: check out the repo, set up pnpm and Node, install dependencies, run the repo's existing validation command, preview a tagged release automatically, and publish to npm only from a manually dispatched run that targets a matching `v*` tag already reachable from `main`. The workflow should request only the permissions needed for read access and npm trusted publishing.
+Second, add the workflow automation. The workflow should fit a single-package repo: check out the repo, set up pnpm and Node, install dependencies, run the repo's existing validation command, and publish to npm when a matching `v*` tag already reachable from `main` is pushed. The workflow should request only the permissions needed for read access and npm trusted publishing.
 
 Third, verify the release path with observable evidence. That includes local package checks (`pnpm test:all`, `npm pack --dry-run --json`), Changesets CLI checks, and syntax validation of the workflow file plus manual execution of the same commands the workflow relies on.
 
