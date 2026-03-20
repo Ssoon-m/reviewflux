@@ -159,7 +159,7 @@ jobs:
             TAG_ARGS=()
           fi
 
-          npm publish --provenance "${TAG_ARGS[@]}"
+          npm publish --provenance --access public "${TAG_ARGS[@]}"
 
       - name: Commit release version
         env:
