@@ -1,6 +1,6 @@
 {
   "name": "reviewflux",
-  "version": "0.0.1-beta",
+  "version": "0.0.2",
   "description": "CLI-first event-driven review runtime",
   "bin": {
     "rvw": "dist/cli/index.mjs",

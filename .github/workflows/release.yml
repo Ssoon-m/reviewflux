@@ -1,22 +1,10 @@
 name: Release
-run-name: ${{ format('release {0}', inputs.version || inputs.bump) }}
+run-name: ${{ format('release {0}', github.ref_name) }}
 
 on:
-  workflow_dispatch:
-    inputs:
-      bump:
-        description: Bump major, minor, or patch
-        required: true
-        type: choice
-        default: patch
-        options:
-          - patch
-          - minor
-          - major
-      version:
-        description: Override version (for example 0.1.1-beta.0). Takes precedence over bump.
-        required: false
-        type: string
+  push:
+    tags:
+      - "v*"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -37,6 +25,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
@@ -52,10 +42,27 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Ensure release runs from main
+      - name: Ensure tagged commit is on main
         run: |
-          if [[ "${GITHUB_REF}" != "refs/heads/main" ]]; then
-            echo "Release workflow must run from main."
+          set -euo pipefail
+          git fetch origin main --depth=1
+
+          if ! git merge-base --is-ancestor "${GITHUB_SHA}" "origin/main"; then
+            echo "Release tag must point to a commit on main."
+            exit 1
+          fi
+
+      - name: Ensure tag version matches package.json
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+
+          VERSION="${TAG_NAME#v}"
+          PACKAGE_VERSION=$(node -p "require('./package.json').version")
+
+          if [[ "${VERSION}" != "${PACKAGE_VERSION}" ]]; then
+            echo "Tag version ${VERSION} does not match package.json version ${PACKAGE_VERSION}."
             exit 1
           fi
 
@@ -84,34 +91,20 @@ jobs:
           cache: pnpm
           registry-url: https://registry.npmjs.org
 
+      - name: Upgrade npm for trusted publishing
+        run: npm install -g npm@^11.5.1
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
       - name: Calculate version
         id: release_meta
         env:
-          INPUT_BUMP: ${{ inputs.bump }}
-          INPUT_VERSION: ${{ inputs.version }}
+          TAG_NAME: ${{ github.ref_name }}
         run: |
           set -euo pipefail
 
-          VERSION="${INPUT_VERSION}"
-
-          if [[ -z "${VERSION}" ]]; then
-            PREV=$(npm view reviewflux@latest version 2>/dev/null || true)
-            if [[ -z "${PREV}" || "${PREV}" == "null" ]]; then
-              PREV=$(node -p "require('./package.json').version")
-            fi
-
-            BASE="${PREV%%-*}"
-            IFS='.' read -r MAJOR MINOR PATCH <<< "${BASE}"
-
-            case "${INPUT_BUMP}" in
-              major) VERSION="$((MAJOR + 1)).0.0" ;;
-              minor) VERSION="${MAJOR}.$((MINOR + 1)).0" ;;
-              *) VERSION="${MAJOR}.${MINOR}.$((PATCH + 1))" ;;
-            esac
-          fi
+          VERSION="${TAG_NAME#v}"
 
           if [[ ! "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
             echo "Invalid release version: ${VERSION}"
@@ -138,12 +131,6 @@ jobs:
             exit 1
           fi
 
-      - name: Update package version for release build
-        env:
-          VERSION: ${{ steps.release_meta.outputs.version }}
-        run: |
-          node -e "const fs=require('node:fs'); const path='package.json'; const pkg=JSON.parse(fs.readFileSync(path,'utf8')); pkg.version=process.env.VERSION; fs.writeFileSync(path, JSON.stringify(pkg, null, 2)+'\n');"
-
       - name: Verify package contents
         run: npm pack --dry-run --json
 
@@ -161,27 +148,11 @@ jobs:
 
           npm publish --provenance --access public "${TAG_ARGS[@]}"
 
-      - name: Commit release version
-        env:
-          VERSION: ${{ steps.release_meta.outputs.version }}
-        run: |
-          set -euo pipefail
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add package.json
-
-          if git diff --cached --quiet; then
-            echo "No version change to commit."
-          else
-            git commit -m "chore(release): publish v${VERSION}"
-            git push origin HEAD:main
-          fi
-
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          VERSION: ${{ steps.release_meta.outputs.version }}
+          TAG_NAME: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          gh release view "v${VERSION}" >/dev/null 2>&1 || \
-            gh release create "v${VERSION}" --title "v${VERSION}" --target HEAD --generate-notes
+          gh release view "${TAG_NAME}" >/dev/null 2>&1 || \
+            gh release create "${TAG_NAME}" --title "${TAG_NAME}" --generate-notes
